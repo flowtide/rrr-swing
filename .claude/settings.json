@@ -1,0 +1,17 @@
+{
+  "_note": "이 파일은 훅만 담는다. MCP 설정(permissions·enabledMcpjsonServers)은 넣지 않는다 — MCP 는 운영자의 user scope 등록(claude mcp add)을 그대로 쓴다. tests/test_standalone_gate.py 가 이를 못박는다.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 bin/turn_context.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

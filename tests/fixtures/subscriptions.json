@@ -1,0 +1,17 @@
+{
+ "account_id": "acct1",
+ "symbols": [
+  "336260",
+  "003230"
+ ],
+ "event_types": [
+  "support_return",
+  "resistance_break",
+  "macro"
+ ],
+ "sessions": [
+  "REG_KRX_NXT"
+ ],
+ "expires_at": "2026-06-18T20:00:00",
+ "declared_at": "2026-06-17T21:00:00"
+}

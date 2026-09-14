@@ -1,0 +1,7 @@
+local/
+config/config.json
+__pycache__/
+*.pyc
+.remember/
+.pytest_cache/
+.DS_Store

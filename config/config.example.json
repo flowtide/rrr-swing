@@ -1,0 +1,51 @@
+{
+  "_setup": "cp config/config.example.json config/config.json 후 <YOUR_*> 를 채운다. config.json 은 .gitignore 대상 — 커밋 금지",
+  "_secret": "telegram_bot_token 과 gw API 키는 크레덴셜이다. 이 파일 전체를 출력·화면공유 하지 말 것 — 필요한 필드만 뽑아 쓴다",
+  "mode": "dry_run",
+  "_mode": "dry_run(결정·원장 기록만, 주문 제출 0) | confirm(MCP 주문 도구로 집행하고 원장에 기록). 단일 진실. 전환(dry_run↔confirm)은 운영자가 주간 미팅에서 정하고 이 값을 바꾼 뒤 재기동한다 — 세션은 이 값을 바꾸지 않는다",
+  "account_id": "<YOUR_ACCOUNT_MASKED>",
+  "operator_channel": "console",
+  "_operator_channel": "console | telegram. console(기본): 운영자 지시=세션 pane 직접 입력, 보고=bin/report.py → stdout + local/reports/. telegram: 수신=claude 텔레그램 채널 플러그인(bin/start.sh 가 --channels 로 붙이고 봇 토큰을 세션 env 로 넘긴다), 보고=bin/tg_send.py. telegram 이면 telegram_bot_token·operator_chat_id 가 필수다",
+  "operator_chat_id": "<YOUR_OPERATOR_CHAT_ID>",
+  "telegram_bot_token": "<YOUR_TELEGRAM_BOT_TOKEN>",
+  "gw": {
+    "base_url": "http://<GW_HOST>:15410",
+    "api_key": "<YOUR_RRR_GW_API_KEY>",
+    "_note": "base_url 기본값 없음(미설정 시 기동 거부). RS_GW_BASE_URL 환경변수로 override 가능. api_key 는 키 **값**이다 — 조회 시 X-API-Key 헤더로 그대로 쓴다. 이 파일은 .gitignore 대상이며 커밋되지 않는다."
+  },
+  "inbound": {
+    "quiet_sec": 30,
+    "inject_max_chars": 1800,
+    "deliver": "herdr",
+    "target": "rs-lead",
+    "_note": "인바운드 어댑터(bin/inbound_rrr.py) 설정. quiet_sec=같은 봉의 마지막 이벤트 뒤 flush 대기, inject_max_chars=한 줄 상한(초과 시 part 분할), deliver=stdout|file|herdr, target=herdr 역할 이름(기본 rs-lead)",
+    "heartbeat_timeout_sec": 45,
+    "market_check": {
+      "every_min": 30,
+      "from": "09:00",
+      "to": "15:30",
+      "_note": "30분 시장 체크 wake: 창 [from, to] 안에서 every_min 슬롯마다 세션 pane 에 [market-check ts=HH:MM] 1줄(내용은 시각뿐 — 코드는 시장을 요약하지 않는다). 다이제스트와 독립, 창 밖 0. every_min 0 = 끔. 기본값은 코드(bin/inbound_core.py MARKET_CHECK_DEFAULTS)"
+    }
+  },
+  "_expiry": "기간·재검토 기본값. horizon_d 는 스토리마다 거래일 숫자로 선언하며 null 은 허용되지 않는다. position_expiry_days·recheck_days_default 는 스토리가 값을 정하지 않았을 때의 기본값.",
+  "position_expiry_days": 20,
+  "accounting": {
+    "close_source": "supplier_daily_candle",
+    "positions": "local/positions.jsonl",
+    "frozen_book": "local/frozen_book.json",
+    "_note": "회계(scripts/marks.py·flags.py·review.py)는 코드가 독립으로 돌린다(사람 크론, 설치는 docs/runbook.md §4). close_source=supplier_daily_candle(기본: 공급자 일봉 종가를 --closes-json 으로 주입, 없으면 브로커 현재가 폴백·출처 기록) | broker(계좌 평가 응답 cur_prc). marks_time=마크 시각(naive KST). 거래정지·휴장은 직전 종가 carry + halted=true"
+  },
+  "memory": {
+    "journal_days": 3,
+    "load_budget_chars": 12000,
+    "file_cap_chars": 4000,
+    "_note": "bin/context_load.py(기동 컨텍스트): local/memory/state 의 '## 운영자 지시' → local/memory/playbook 최신 → local/memory/state 최신 → local/memory/journal 최근 journal_days 개를 이 순서로 load_budget_chars 안에 담아 시스템 프롬프트로 넣는다. 담는 순서가 우선순위다 — 뒤 절(일지)이 먼저 굶는다. 파일당 file_cap_chars, 초과분은 [truncated], 통째로 빠진 절은 끝에 [예산 소진 …]. 매 턴 주입은 bin/turn_context.py(상한 1,000자). 기억이 커져도 읽는 양은 늘지 않는다(AGENTS.md §7). 기본값은 코드에 있다"
+  },
+  "daily_token_cap": 1000000,
+  "_daily_token_cap": "일 토큰 상한(운영자 소유). 접근 시 세션이 구독을 줄인다(AGENTS.md §5-9).",
+  "report": {
+    "reports_dir": "local/reports",
+    "order_format": "[order] {side_kr} {sym} {qty}주 @{px} {exchange} {status} (ord_no={ord_no}, decision_ref={decision_ref}, {time})"
+  },
+  "_report": "사후 보고 1줄(kiwoom-swing 규율 1). 템플릿 자리표시자 8항목 sym·side(side_kr)·qty·px·exchange·ord_no·status·decision_ref 는 빠져도 끝에 key=value 로 붙는다. console 채널은 stdout + reports_dir/<date>.md"
+}
