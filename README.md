@@ -3,7 +3,7 @@
 키움 실계좌 하나를 맡은 **스윙 트레이더(LLM 세션)** 의 작업 공간. 시장의 흐름과 종목의 이야기를 알고, 자기 판단으로 베팅하고, 결과를 기록하고, 배운다. 공급자(rrr)의 이벤트를 `GET /events/stream`(SSE)으로 자기가 선언한 구독분만 봉당 다이제스트로 받고, 증거를 읽어 판단하며, 주문은 MCP 도구로 내고 `bin/order.py` 는 집행 결과를 기록하고 사후 보고를 생성한다. 코드는 매매를 결정하지 않는다 — 이벤트 전달·장부 기록·사후 보고만 코드다(급정지는 gw API 키 비활성화, D18). 운영자 채널은 콘솔 또는 텔레그램 플러그인이다.
 
 - **개요(목적·개념, 다이어그램)**: `docs/01-overview.md` — 상위 문서. 처음 읽는 사람은 여기부터.
-- 트레이더 계약: `AGENTS.md`. 진입점: `CLAUDE.md`. 런타임은 claude 고정, 역할은 `rs-lead`·`rs-exec`(AGENTS.md §8).
+- 트레이더 계약: `AGENTS.md`. 진입점: `CLAUDE.md`. 역할은 `rs-lead`·`rs-exec`(AGENTS.md §8) — `rs-lead` 는 claude 고정이고 `rs-exec` 만 `--runtime claude|agy` 를 고른다.
 - 운영: `docs/02-runbook.md`(장전·장중·마감 후·주간·운전 모드·예외). 참고: `docs/03-evidence_guide.md`(증거 필드·신뢰도·결측), `docs/04-price_source.md`(현재가 폴백), `docs/05-context.md`(기억이 세션에 들어가는 두 경로), `docs/06-local.md`(`local/` 의 구역과 손대는 규칙).
 - 경로 표기: `rrr-swing` 작업 디렉터리 기준 상대경로.
 
@@ -46,13 +46,14 @@ python3 bin/subscribe.py set --symbols 005930,000660 \
 
 ```bash
 bin/start.sh --role exec                           # rs-exec(집행 역할) — 인바운드 어댑터를 띄우지 않는다
+bin/start.sh --role exec --runtime agy             # rs-exec 를 agy 로 (전제: agy 에 kiwoom-gw MCP·스킬. docs/02-runbook.md §1-6)
 bin/start.sh --adapter-only --since 0              # 인바운드 어댑터만, --deliver file 로 1거래일 관측
 python3 bin/inbound_rrr.py --once                  # 재시작 뒤 catch-up(GET /api/events, 커서 이후만)
 ```
 
 | 명령 | 용도 |
 |---|---|
-| `bin/start.sh [--role lead|exec] [--since 0|<id>|$] [--adapter-only]` | config 검증(비밀 미출력, `gw.base_url`·`gw.api_key` 존재만 확인) → selftest → `/api/health` 1회 → 이전 인바운드 어댑터 정리(lsof cwd) → 인바운드 어댑터 백그라운드(`local/inbound.pid`, lead 만) → 런타임 기동. `operator_channel=telegram` 이면 텔레그램 플러그인 채널 주입 |
+| `bin/start.sh [--role lead|exec] [--runtime claude|agy] [--since 0|<id>|$] [--adapter-only]` | config 검증(비밀 미출력, `gw.base_url`·`gw.api_key` 존재만 확인) → selftest → `/api/health` 1회 → 이전 인바운드 어댑터 정리(lsof cwd) → 인바운드 어댑터 백그라운드(`local/inbound.pid`, lead 만) → 런타임 기동. `operator_channel=telegram` 이면 텔레그램 플러그인 채널 주입 |
 | `python3 bin/inbound_rrr.py --deliver stdout|file|herdr [--target …] [--since …] [--once] [--redeliver]` | **인바운드 어댑터**: SSE 클라이언트 → `EventEntry`→태그 정규화 → 로컬 구독 재검사 → 계좌당 봉당 다이제스트 → 배달. 장중 창 안 30분마다 `[market-check ts=HH:MM]` wake(시각뿐). 커서 `local/events.cursor`(처리 후 저장), 재접속 backoff 1→60s, 하트비트 타임아웃, 401 종료·503 backoff |
 | `python3 bin/subscribe.py set --symbols … --events … --sessions … --expires … [--append-ledger]` | 구독 선언(세션이 실행). `show` / `clear` |
 | `python3 bin/decision_packet.py <sym> --bar-ts <ts> [--with-momentum] [--stdout]` | 게이트웨이 `/api/stocks/{sym}/context`·`/api/stocks/{sym}/flow`(·`/api/stocks/{sym}/momentum`) GET 전용 조회(X-API-Key 인증), 원문을 `local/packets/` 에 보존 |

@@ -51,7 +51,13 @@
    bin/init_local.sh                        # 최초 1회(멱등): 원본 local/memory/{playbook,state,journal} + 산출물 local/system-prompts/ + local/{stories,meetings,lessons,consults,packets,reports} + 첫 원본
    bin/start.sh --role lead --check-only    # config·자격증명 점검(기동 0)
    bin/start.sh --role lead                 # mode 는 config.mode. 런타임 env: RS_ROLE=lead
+   bin/start.sh --role exec                 # rs-exec(집행). 런타임 env: RS_ROLE=exec RS_RUNTIME=claude
+   bin/start.sh --role exec --runtime agy   # rs-exec 를 agy 로. 전제조건은 바로 아래
    ```
+   **런타임**(`--runtime claude|agy`, 기본 claude): `rs-lead` 는 claude 고정이다 — 기억이 `--append-system-prompt-file` 로 들어가는데 agy 에 대응 플래그가 없어 `bin/start.sh` 가 `--runtime agy --role lead` 를 거부한다(`docs/05-context.md`). `rs-exec` 만 런타임을 고른다. agy 로 띄우기 전에 **agy 쪽에** 두 가지가 있어야 하며, 둘 다 없어도 세션은 정상 기동한 얼굴로 뜨고 주문만 되지 않는다:
+   - **kiwoom-gw MCP 등록** — `~/.gemini/config/mcp_config.json` 의 `mcpServers.kiwoom-gw`. 없으면 `kiwoom_order_*` 가 목록에 없다.
+   - **kiwoom-gw 스킬** — `~/.gemini/config/skills/kiwoom-gw`. exec 부트 프롬프트가 이 스킬의 절차(3소스 대사)를 지시하는데, 없으면 절차 없이 주문한다.
+
    기동 직후 `kiwoom_list_tools` 로 도구 목록을 확인한다. 주문은 gw MCP 주문 도구로 내고, `bin/order.py` 는 집행 결과 기록 및 사후 보고를 담당한다.
 7. 세션 기동 직후: 브로커 전제 확인 → 계좌·원장 대사(`python3 scripts/ledger.py validate`, `python3 scripts/ledger.py tail -n 20`, `python3 scripts/marks.py --report`) → 상태 확인(시스템 프롬프트) → 활성 구독 복원(`bin/subscribe.py show`; 비었거나 만료면 §1-5 로 다시 선언) → 재시작 뒤 밀린 이벤트가 있으면 `bin/inbound_rrr.py --once`(커서 이후 `GET /api/events` 페이지 catch-up) → 운영자 보고(console: `python3 bin/report.py --text "…"`, telegram: `bin/tg_send.py`).
 8. 전달: **인바운드 어댑터**(`bin/inbound_rrr.py`)가 `local/subscriptions.json` 을 읽어 구독 선언을 서버 쿼리(`symbols`·`kinds`)로 넘기고, 받은 엔트리를 **로컬에서 다시 검사**한다(세션·만료는 서버가 모른다; macro 도 `symbols` 필터에서 면제되므로 `symbols` 는 항상 전달, `evts`·`tick` 은 전송 0).

@@ -343,19 +343,23 @@ class StandaloneGateTests(unittest.TestCase):
             for t in forked:
                 self.assertNotIn(t, content, f"{fpath}: '{t}' 대신 '활성 유니버스' 를 쓴다")
 
-    def test_only_claude_runtime_remains(self):
-        """런타임은 claude 고정이다(D) — 다른 런타임의 잔해가 남으면 안 된다.
+    def test_unsupported_runtimes_stay_removed(self):
+        """지원 런타임은 claude|agy 뿐이며, 나머지 잔해는 남으면 안 된다.
 
-        GEMINI.md 는 존재하지 않는 `--runtime agy`·`--runtime codex` 와 `agy --sandbox …` 를
-        설명하고 있었다. 쓰이지 않는 경로는 검증되지 않은 채 낡고, 남아 있다는 사실만으로
-        선택지가 있는 것처럼 읽힌다. mcp_guard 의 codex·agy 점검도 프로덕션이 부르지 않았다.
+        한때 `--runtime codex` 와 Stage 7~9 의 mcp_guard(check_agy·CODEX_OVERRIDE …)가 있었다.
+        쓰이지 않는 경로는 검증되지 않은 채 낡고, 남아 있다는 사실만으로 선택지가 있는 것처럼
+        읽힌다 — 프로덕션이 부르지 않는 점검은 점검이 아니다. codex 는 주문 경로가 갈리므로
+        (kiwoom-gw 미등록 + 동명 도구가 kiwoom-sdk-mcp 로 해석) 되살리지 않는다.
+
+        GEMINI.md 도 만들지 않는다. agy 는 AGENTS.md 계층을 읽으므로 계약이 이미 닿아 있고,
+        런타임마다 계약 사본을 두면 사본이 따로 자란다.
         """
         self.assertFalse(os.path.exists(os.path.join(ROOT, "GEMINI.md")),
-                         "GEMINI.md 는 삭제됐다 — 런타임은 claude 뿐이다")
+                         "GEMINI.md 는 만들지 않는다 — agy 도 AGENTS.md 를 읽는다")
         self.assertFalse(os.path.isdir(os.path.join(ROOT, ".claude", "skills", "trade-pair")),
-                         "trade-pair 스킬은 삭제됐다 — tmux 도 agy 도 쓰지 않는다")
-        dead = ("--runtime agy", "--runtime codex", "check_agy", "codex_override_args",
-                "CODEX_OVERRIDE", "--agy-config", ".gemini/config", "GEMINI.md")
+                         "trade-pair 스킬은 삭제됐다 — tmux 는 쓰지 않는다")
+        dead = ("--runtime codex", "check_agy", "codex_override_args",
+                "CODEX_OVERRIDE", "--agy-config", "GEMINI.md")
         files = (_repo_text_files(("bin", "scripts", "docs"), (".py", ".sh", ".md"))
                  + [os.path.join(ROOT, n) for n in ("README.md", "AGENTS.md", "CLAUDE.md")])
         for fpath in files:
@@ -365,6 +369,23 @@ class StandaloneGateTests(unittest.TestCase):
                 content = f.read()
             for token in dead:
                 self.assertNotIn(token, content, f"{os.path.relpath(fpath, ROOT)}: 폐기된 런타임 잔해 '{token}'")
+
+    def test_agy_runtime_preconditions_are_documented(self):
+        """agy 로 rs-exec 을 띄우기 전에 agy 쪽에 있어야 하는 두 가지를 런북이 적는다.
+
+        ① kiwoom-gw MCP 등록 — 없으면 주문 도구가 없다.
+        ② kiwoom-gw 스킬 — exec 부트 프롬프트가 "kiwoom-gw skill 절차 준수" 를 지시하는데,
+           없으면 3소스 대사 절차 없이 주문한다.
+
+        둘 다 빠져도 세션은 **정상 기동한 얼굴로** 뜬다. 에러가 나지 않는 침묵 실패라
+        운영자가 알아차릴 신호가 런북의 전제조건 문장뿐이고, 기동 명령만 적고 전제조건을
+        빠뜨리면 그 문장이 사라진 것을 아무도 못 본다.
+        """
+        with open(os.path.join(ROOT, "docs", "02-runbook.md"), encoding="utf-8") as f:
+            runbook = f.read()
+        self.assertIn("--runtime agy", runbook, "런북에 agy 기동 명령이 없다")
+        self.assertIn("mcp_config.json", runbook, "런북에 agy 의 MCP 등록 위치가 없다")
+        self.assertIn("skills/kiwoom-gw", runbook, "런북에 agy 의 kiwoom-gw 스킬 전제조건이 없다")
 
     def test_dead_tokens_removed_from_documentation(self):
         """W6: 폐기된 레거시 토큰들이 문서에 재발하지 않아야 한다.

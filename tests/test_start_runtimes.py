@@ -26,7 +26,7 @@ class StartRuntimesTest(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         self.stubs = os.path.join(self.d, "stubs")
         os.makedirs(self.stubs)
-        for name in ("claude",):
+        for name in ("claude", "agy"):
             p = os.path.join(self.stubs, name)
             with open(p, "w", encoding="utf-8") as f:
                 f.write(STUB)
@@ -162,7 +162,10 @@ class StartRuntimesTest(unittest.TestCase):
         self.assertIn("init_local", r.stdout + r.stderr)
 
     def test_boot_prompt_is_separated_from_variadic_options(self):
-        """부트 프롬프트 앞에 `--` 가 있어야 한다.
+        """부트 프롬프트 앞에 `--` 가 있어야 한다(claude 한정).
+
+        agy 는 프롬프트를 `-i` 의 값으로 받으므로 이 구분자가 없다 — 그쪽은
+        test_exec_runs_on_agy_runtime 이 따로 못박는다.
 
         `claude --mcp-config <configs...>` 는 공백으로 이어지는 가변 인자다. `--` 없이
         프롬프트를 뒤에 붙이면 claude 가 그것까지 MCP 파일 경로로 읽고 기동 전에 죽는다:
@@ -240,10 +243,84 @@ class StartRuntimesTest(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("lead|exec", r.stdout + r.stderr)
 
-    def test_runtime_option_removed(self):
-        r = self.run_start("--runtime", "claude", "--dry-launch")
-        self.assertEqual(r.returncode, 2)
-        self.assertIn("unknown arg", r.stdout + r.stderr)
+    def test_runtime_claude_is_accepted_explicitly(self):
+        """`--runtime claude` 는 기본값을 적어 둔 것이며 기동 명령이 달라지지 않는다."""
+        r = self.run_start("--role", "exec", "--runtime", "claude", "--dry-launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        j = self.launched()
+        self.assertEqual(j["env"], {"RS_ROLE": "exec", "RS_RUNTIME": "claude"})
+        self.assertEqual(j["argv"][-2], "--", "claude 는 `--` 뒤 위치 인자로 프롬프트를 받는다")
+
+    def test_exec_runs_on_agy_runtime(self):
+        """rs-exec 은 agy 로도 뜬다 — 부트 프롬프트는 `-i` 의 **값**으로 간다.
+
+        agy 의 `-i`(--prompt-interactive) 가 claude 의 위치 인자와 동치다: 초기 프롬프트를
+        실행한 뒤 세션을 유지한다. 프롬프트가 플래그 값이므로 claude 에서 한 번 물렸던
+        `--` 구분자 문제(가변 인자가 프롬프트를 삼킨다)가 agy 에는 없다 — 대신 프롬프트가
+        정말 `-i` 에 붙어 있는지를 못박는다. 빠지면 agy 는 빈 대화로 떠서 지시를 기다린다.
+        """
+        r = self.run_start("--role", "exec", "--runtime", "agy", "--dry-launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        j = self.launched()
+        self.assertEqual(j["env"], {"RS_ROLE": "exec", "RS_RUNTIME": "agy"})
+        argv = j["argv"]
+        self.assertIn("-i", argv, "agy 는 -i 로 부트 프롬프트를 받는다")
+        self.assertIn("세션 기동", argv[argv.index("-i") + 1], "부트 프롬프트가 -i 의 값이 아니다")
+        self.assertNotIn("--", argv, "agy 는 `--` 구분자를 쓰지 않는다")
+
+    def test_agy_runtime_skips_permission_prompts(self):
+        """rs-exec 은 사람이 없는 세션이다 — 승인 프롬프트가 뜨면 조용히 멈춘다.
+
+        agy 의 settings.json 이 이미 mcp(*)·command(*) 와일드카드 allow 라 이 플래그가
+        넓히는 권한은 없다. 막는 것은 정지다.
+        """
+        r = self.run_start("--role", "exec", "--runtime", "agy", "--dry-launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("--dangerously-skip-permissions", self.launched()["argv"])
+
+    def test_agy_boot_prompt_names_its_runtime(self):
+        """부트 프롬프트의 runtime 표기는 사실 기록이다 — 틀리면 세션이 자기를 오인한다."""
+        r = self.run_start("--role", "exec", "--runtime", "agy", "--dry-launch")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        boot = self.launched()["argv"][-1]
+        self.assertIn("runtime=agy", boot)
+        self.assertNotIn("runtime=claude", boot)
+
+    def test_agy_is_refused_for_lead_role(self):
+        """lead 는 claude 고정이다.
+
+        lead 의 기억은 `--append-system-prompt-file` 로 들어가는데(docs/05-context.md)
+        agy 에 대응 플래그가 없다. 막지 않으면 기억 없는 lead 가 **정상 기동한 얼굴로**
+        뜬다 — 어댑터가 죽었을 때 런타임을 띄우지 않는 것과 같은 부류라 닫아 둔다.
+        """
+        r = self.run_start("--role", "lead", "--runtime", "agy", "--dry-launch")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        out = r.stdout + r.stderr
+        self.assertIn("agy", out)
+        self.assertIn("lead", out)
+        self.assertFalse(os.path.exists(self.log), "거부했는데 런타임이 떴다")
+
+        # 게이트는 인자 파싱 자리다 — 점검 경로로 들어와도 같은 곳에서 막힌다.
+        r2 = self.run_start("--role", "lead", "--runtime", "agy", "--check-only")
+        self.assertEqual(r2.returncode, 2, r2.stdout + r2.stderr)
+
+    def test_unsupported_runtime_rejected(self):
+        """지원 목록은 claude|agy 뿐이다.
+
+        codex 는 넣지 않는다 — 이 머신의 codex 에는 kiwoom-gw 가 등록돼 있지 않고,
+        동명 `kiwoom_order_*` 가 kiwoom-sdk-mcp 로 해석되어 단일 주문 경로(D1)와
+        gw 키 비활성화 급정지(D18)를 함께 우회한다.
+        """
+        for rt in ("codex", "gemini"):
+            with self.subTest(runtime=rt):
+                r = self.run_start("--role", "exec", "--runtime", rt, "--dry-launch")
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+                self.assertIn("claude|agy", r.stdout + r.stderr)
+
+    def test_check_only_reports_runtime(self):
+        r = self.run_start("--role", "exec", "--runtime", "agy", "--check-only")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("runtime=agy", r.stdout)
 
     def test_telegram_channel_passes_token_to_session_env_for_lead(self):
         dummy_token = "dummy_telegram_token_xyz"

@@ -326,13 +326,21 @@ class RuntimeNotStartedWithoutAdapterTest(unittest.TestCase):
         기동 직후 확인만으로는 그 뒤 MCP 확정본 생성 등을 거치는 동안 죽는 경우를 놓친다.
         그 창은 타이밍을 강제할 수 없어(프로세스 사망 시점을 재현할 수 없다) 구조로 못박는다 —
         exec 직전 호출을 지우는 뮤턴트가 행동 테스트만으로는 살아남았다.
+
+        셸을 런타임으로 넘기는 자리도 **한 곳**이어야 한다. 런타임별로 exec 를 따로 두면
+        확인을 거치지 않는 두 번째 출구가 생긴다(agy 를 더할 때 실제로 그렇게 짰다가
+        이 테스트가 잡았다). 명령은 확인 전에 확정하고 exec 는 하나로 모은다.
         """
         with open(START, encoding="utf-8") as f:
             src = f.read()
         calls = [i for i, line in enumerate(src.splitlines())
                  if line.strip().startswith("abort_if_adapter_dead ")]
         self.assertEqual(len(calls), 2, f"호출이 2곳이어야 한다(현재 {len(calls)}곳)")
-        exec_line = next(i for i, line in enumerate(src.splitlines()) if line.startswith("exec claude"))
+        execs = [i for i, line in enumerate(src.splitlines()) if line.startswith("exec ")]
+        self.assertEqual(len(execs), 1,
+                         f"셸을 런타임으로 바꾸는 자리는 한 곳이어야 한다(현재 {len(execs)}곳) — "
+                         "런타임이 늘어도 명령을 먼저 확정하고 확인 뒤 한 번만 exec 한다")
+        exec_line = execs[0]
         self.assertLess(calls[-1], exec_line, "exec 직전 확인이 없다")
         between = src.splitlines()[calls[-1] + 1:exec_line]
         self.assertFalse([l for l in between if l.strip() and not l.strip().startswith("#")],
