@@ -15,7 +15,8 @@ import ledger as lg  # noqa: E402
 EXPECTED_REQUIRED = {
     "plan_created": ["plan_id", "sym", "account_id", "entry_zone", "allocation_pct", "horizon_d", "conviction", "invalidation_conditions"],
     "plan_activated": ["plan_id"],
-    "subscription": ["symbols", "event_types", "sessions", "expires_at"],
+    # 감시 목록 선언 — 남은 필드는 종목뿐(세션·유형·만료 필터 폐기, 2026-09-15)
+    "subscription": ["symbols"],
     "decision": ["decision_id", "trigger", "event_label", "sym", "checklist", "action", "rationale"],
     "order": ["decision_ref", "sym", "side", "px", "qty", "dup_key"],
     "safety_check": ["order_ref", "result"],

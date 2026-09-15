@@ -54,59 +54,12 @@ class ParseTagLine(unittest.TestCase):
         self.assertIn("zz", t["kv"])  # 알 수 없는 key 는 버리지 않고 보존(값 변형 0)
 
 
-class SubscriptionMatch(unittest.TestCase):
-    SUB = {"symbols": ["336260"], "event_types": ["resistance_break", "macro"], "sessions": ["REG_KRX_NXT"],
-           "expires_at": "2026-06-30T20:00:00"}
-    NOW = datetime(2026, 6, 18, 10, 36)
-
-    def test_match(self):
-        ok, reason = ib.subscription_matches(self.SUB, ib.parse_tag_line(MON), self.NOW)
-        self.assertTrue(ok); self.assertEqual(reason, "")
-
-    def test_unsubscribed_symbol(self):
-        t = ib.parse_tag_line(MON.replace("sym=336260", "sym=000660"))
-        self.assertEqual(ib.subscription_matches(self.SUB, t, self.NOW), (False, "unsubscribed"))
-
-    def test_unsubscribed_event_type(self):
-        t = ib.parse_tag_line(MON.replace("evt=resistance_break", "evt=support_break"))
-        self.assertEqual(ib.subscription_matches(self.SUB, t, self.NOW), (False, "unsubscribed"))
-
-    def test_session_mismatch(self):
-        t = ib.parse_tag_line(MON.replace("sess=REG_KRX_NXT", "sess=POST_NXT"))
-        self.assertEqual(ib.subscription_matches(self.SUB, t, self.NOW), (False, "session_mismatch"))
-
-    def test_session_unknown_when_sess_absent(self):
-        t = ib.parse_tag_line(MON.replace(" sess=REG_KRX_NXT", ""))
-        self.assertEqual(ib.subscription_matches(self.SUB, t, self.NOW), (False, "session_unknown"))
-
-    def test_expired_subscription(self):
-        ok, reason = ib.subscription_matches(self.SUB, ib.parse_tag_line(MON), datetime(2026, 7, 1, 9, 0))
-        self.assertEqual((ok, reason), (False, "subscription_expired"))
-
-    def test_tick_needs_explicit_tick_event_type(self):
-        t = ib.parse_tag_line(TICK)
-        sub = dict(self.SUB, symbols=["003230"])
-        self.assertEqual(ib.subscription_matches(sub, t, self.NOW), (False, "unsubscribed"))
-        sub2 = dict(sub, event_types=["tick"])
-        self.assertEqual(ib.subscription_matches(sub2, t, self.NOW), (True, ""))
-
-    def test_macro_needs_explicit_macro_event_type(self):
-        t = ib.parse_tag_line(MACRO)
-        self.assertEqual(ib.subscription_matches(self.SUB, t, self.NOW), (True, ""))
-        self.assertEqual(ib.subscription_matches(dict(self.SUB, event_types=["resistance_break"]), t, self.NOW),
-                         (False, "unsubscribed"))
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-FIX = os.path.join(ROOT, "tests", "fixtures")
-CFG2 = dict(CFG, inbound={"quiet_sec": 30, "inject_max_chars": 1800, "deliver": "stdout"})
-
-
-def _sub():
-    return json.load(open(os.path.join(FIX, "subscriptions.json"), encoding="utf-8"))
+def _watch(tmpdir, syms=("336260", "003230")):
+    """감시 목록 파일 하나. Processor 는 WatchList 를 받는다 — 이벤트마다 이 파일을 확인한다."""
+    p = os.path.join(tmpdir, "watchlist.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump({s: {} for s in syms}, f)
+    return ib.WatchList(p)
 
 
 class DigestBufferTests(unittest.TestCase):
@@ -211,8 +164,7 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             log = ib.DeliveryLog(os.path.join(d, "del.jsonl"))
-            sub = {"symbols": ["336260"], "event_types": ["support_return"], "sessions": ["REG_KRX_NXT"], "expires_at": "2026-06-30T20:00:00"}
-            proc = ib.Processor({"account_id": "acct1", "inbound": {"quiet_sec": 0}}, sub, log, deliver=flaky_deliver,
+            proc = ib.Processor({"account_id": "acct1", "inbound": {"quiet_sec": 0}}, _watch(d), log, deliver=flaky_deliver,
                                 now_fn=lambda: datetime(2026, 6, 18, 10, 50))
 
             # Helper to create tagged event
@@ -227,17 +179,14 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
             proc.handle_event(make_tagged("2026-06-18T10:05:00"), source="s", ref="2-0")
             # Bar 1 delivery attempted -> blocked! In queue. Queue has 1.
             self.assertEqual(len(proc.delivery_queue), 1)
-            self.assertIsNone(proc.cursor_committed_ref)
 
             # Bar 3 arrives -> flushes Bar 2. Bar 2 delivery attempted -> blocked! Queue has 2.
             proc.handle_event(make_tagged("2026-06-18T10:10:00"), source="s", ref="3-0")
             self.assertEqual(len(proc.delivery_queue), 2)
-            self.assertIsNone(proc.cursor_committed_ref)
 
             # Bar 4 arrives -> flushes Bar 3. Bar 3 delivery attempted -> blocked! Queue has 3.
             proc.handle_event(make_tagged("2026-06-18T10:15:00"), source="s", ref="4-0")
             self.assertEqual(len(proc.delivery_queue), 3)
-            self.assertIsNone(proc.cursor_committed_ref)
 
             # Bar 5 arrives -> flushes Bar 4. Bar 4 delivery attempted -> blocked!
             # Queue would be 4 -> overflow! Oldest (Bar 1) is dropped.
@@ -245,7 +194,6 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
             self.assertEqual(len(proc.delivery_queue), 3)
             self.assertEqual(proc.skipped_bars, 1)
             # Dropped Bar 1 ref commits cursor!
-            self.assertEqual(proc.cursor_committed_ref, "1-0")
 
             # Now target unblocks!
             blocked[0] = False
@@ -256,8 +204,6 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
             self.assertEqual(proc.skipped_bars, 0)
             # The first delivered item must have [생략 1봉] prefix!
             self.assertTrue(delivered[0].startswith("[생략 1봉] [digest"))
-            # Newest ref commits cursor
-            self.assertEqual(proc.cursor_committed_ref, "5-0")
 
     def _setup_blocked_proc(self):
         import tempfile
@@ -271,8 +217,7 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
 
         tmp = tempfile.TemporaryDirectory()
         log = ib.DeliveryLog(os.path.join(tmp.name, "del.jsonl"))
-        sub = {"symbols": ["336260"], "event_types": ["support_return"], "sessions": ["REG_KRX_NXT"], "expires_at": "2026-06-30T20:00:00"}
-        proc = ib.Processor({"account_id": "acct1", "inbound": {"quiet_sec": 0}}, sub, log, deliver=flaky_deliver,
+        proc = ib.Processor({"account_id": "acct1", "inbound": {"quiet_sec": 0}}, _watch(tmp.name), log, deliver=flaky_deliver,
                             now_fn=lambda: datetime(2026, 6, 18, 10, 50))
         return proc, blocked, tmp
 
@@ -286,85 +231,9 @@ class HerdrDeliveryQueueTests(unittest.TestCase):
             "line": f"#mon schema=rrr_mon_alert_v1 evt={evt} sym={sym} lvl=s1 lvl_px=100 px=105 bar_ts={bar_ts} as_of=2026-06-18T10:00:00 sess=REG_KRX_NXT",
         }
 
-    def test_queue_nonempty_prevents_cursor_advance_on_bad_tag(self):
-        proc, blocked, tmp = self._setup_blocked_proc()
-        with tmp:
-            proc.handle_event(self._make_tagged("2026-06-18T10:00:00"), source="s", ref="1-0")
-            proc.finalize()
-            self.assertTrue(proc.buf.is_empty())
-            self.assertEqual(len(proc.delivery_queue), 1)
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # While delivery_queue is non-empty, bad_tag must NOT advance cursor
-            res = proc.handle_event(None, source="s", ref="bad-1")
-            self.assertEqual(res, "skip:bad_tag")
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # When queue is unblocked and drained, cursor catches up through delivered item and _last_seen_ref
-            blocked[0] = False
-            proc.finalize()
-            self.assertEqual(len(proc.delivery_queue), 0)
-            self.assertEqual(proc.cursor_committed_ref, "bad-1")
-
-            # With queue now empty, subsequent bad_tag immediately advances cursor
-            res = proc.handle_event(None, source="s", ref="bad-2")
-            self.assertEqual(res, "skip:bad_tag")
-            self.assertEqual(proc.cursor_committed_ref, "bad-2")
-
-    def test_queue_nonempty_prevents_cursor_advance_on_unsubscribed(self):
-        proc, blocked, tmp = self._setup_blocked_proc()
-        with tmp:
-            proc.handle_event(self._make_tagged("2026-06-18T10:00:00"), source="s", ref="1-0")
-            proc.finalize()
-            self.assertTrue(proc.buf.is_empty())
-            self.assertEqual(len(proc.delivery_queue), 1)
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # While delivery_queue is non-empty, unsubscribed event must NOT advance cursor
-            unsub_tagged = self._make_tagged("2026-06-18T10:05:00", sym="005930")
-            res = proc.handle_event(unsub_tagged, source="s", ref="unsub-1")
-            self.assertEqual(res, "skip:unsubscribed")
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # When queue is unblocked and drained, cursor catches up through delivered item and _last_seen_ref
-            blocked[0] = False
-            proc.finalize()
-            self.assertEqual(len(proc.delivery_queue), 0)
-            self.assertEqual(proc.cursor_committed_ref, "unsub-1")
-
-            # With queue now empty, subsequent unsubscribed event immediately advances cursor
-            res = proc.handle_event(unsub_tagged, source="s", ref="unsub-2")
-            self.assertEqual(res, "skip:unsubscribed")
-            self.assertEqual(proc.cursor_committed_ref, "unsub-2")
-
-    def test_queue_nonempty_prevents_cursor_advance_on_duplicate(self):
-        proc, blocked, tmp = self._setup_blocked_proc()
-        with tmp:
-            tagged1 = self._make_tagged("2026-06-18T10:00:00")
-            proc.handle_event(tagged1, source="s", ref="1-0")
-            proc.finalize()
-            self.assertTrue(proc.buf.is_empty())
-            self.assertEqual(len(proc.delivery_queue), 1)
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # While delivery_queue is non-empty, duplicate event must NOT advance cursor
-            res = proc.handle_event(tagged1, source="s", ref="dup-1")
-            self.assertEqual(res, "skip:duplicate")
-            self.assertIsNone(proc.cursor_committed_ref)
-
-            # When queue is unblocked and drained, cursor catches up through delivered item and _last_seen_ref
-            blocked[0] = False
-            proc.finalize()
-            self.assertEqual(len(proc.delivery_queue), 0)
-            self.assertEqual(proc.cursor_committed_ref, "dup-1")
-
-            # With queue now empty, subsequent duplicate event immediately advances cursor
-            res = proc.handle_event(tagged1, source="s", ref="dup-2")
-            self.assertEqual(res, "skip:duplicate")
-            self.assertEqual(proc.cursor_committed_ref, "dup-2")
-
-
-
+    # 커서 전진 테스트 3종은 삭제됐다 — `cursor_committed_ref`(at-least-once 커밋) 기계
+    # 자체가 폐기됐기 때문이다. 어댑터는 접속 이후만 받으며 끊긴 구간을 따라잡지 않는다.
+    # 큐가 막혔을 때의 행동(깊이 3 · 가장 오래된 것 폐기 · [생략 n봉])은 위 테스트가 지킨다.
 
 
 class TickKeyOrderTests(unittest.TestCase):

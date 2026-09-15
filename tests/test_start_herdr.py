@@ -1,4 +1,4 @@
-"""start.sh: herdr pane 게이트 (D15) 와 pane 판별 (bin/herdr_pane.py).
+"""start.sh: herdr pane 게이트 와 pane 판별 (bin/herdr_pane.py).
 
 두 가지를 못박는다.
 

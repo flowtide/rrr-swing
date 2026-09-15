@@ -37,8 +37,9 @@ class MarketCheckBase(unittest.TestCase):
         self.d = tempfile.mkdtemp()
         self.logp = os.path.join(self.d, "delivery.jsonl")
         self.out = []
-        with open(os.path.join(FIX, "subscriptions.json"), encoding="utf-8") as f:
-            self.sub = json.load(f)
+        self.watch_path = os.path.join(self.d, "watchlist.json")
+        with open(self.watch_path, "w", encoding="utf-8") as f:
+            json.dump({"336260": {}, "003230": {}}, f)
         self.clock = Clock("2026-06-18T08:30:00")
 
     def proc(self, mc=None, **inbound_over):
@@ -47,7 +48,7 @@ class MarketCheckBase(unittest.TestCase):
             inbound["market_check"] = mc
         inbound.update(inbound_over)
         cfg = {"account_id": "acct1", "operator_chat_id": "111", "signal_chat_id": "-500", "signal_sender_id": "777", "inbound": inbound}
-        return core.Processor(cfg, self.sub, core.DeliveryLog(self.logp), deliver=self.out.append, now_fn=self.clock)
+        return core.Processor(cfg, core.WatchList(self.watch_path), core.DeliveryLog(self.logp), deliver=self.out.append, now_fn=self.clock)
 
     def log_rows(self, kind=None):
         if not os.path.exists(self.logp):

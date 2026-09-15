@@ -85,7 +85,7 @@ class StartRuntimesTest(unittest.TestCase):
             self.assertNotIn("도구가 없음을 확인", boot)
             self.assertNotIn("주문 경로는 bin/order.py 뿐", boot)
             self.assertIn("집행 결과 기록·보고", boot)
-            for tool in ("bin/order.py", "bin/consult.py", "scripts/ledger.py", "scripts/rt_calc.py", "bin/decision_packet.py", "bin/subscribe.py", "bin/report.py"):
+            for tool in ("bin/order.py", "bin/consult.py", "scripts/ledger.py", "scripts/rt_calc.py", "bin/decision_packet.py", "bin/watchlist.py", "bin/report.py"):
                 self.assertIn(tool, boot, tool)
             self.assertNotIn("eod_cancel", boot)
             self.assertIn("SOR 고정", boot)
@@ -95,6 +95,10 @@ class StartRuntimesTest(unittest.TestCase):
             self.assertIn("5요소 중 거래소를 매번 고르지 않는다", boot)
             self.assertIn("마감 전 취소 작업을 두지 않는다", boot)
             self.assertIn("[market-check ts=HH:MM]", boot)
+            # 목록에 없는 종목은 오지 않는다 — 기동 때마다 대조하라는 지시가 빠지면
+            # 어제 목록을 물려받고도 조용한 장으로 읽는다(2026-09-15).
+            self.assertIn("매번 오늘 봐야 할 종목과 대조하라", boot)
+            self.assertNotIn("bin/subscribe.py", boot)
             self.assertIn("AGENTS.md §10", boot)
             self.assertNotIn("체크리스트", boot)
             # 기억은 부트 프롬프트가 아니라 시스템 프롬프트로 간다(docs/05-context.md).
@@ -308,8 +312,8 @@ class StartRuntimesTest(unittest.TestCase):
         """지원 목록은 claude|agy 뿐이다.
 
         codex 는 넣지 않는다 — 이 머신의 codex 에는 kiwoom-gw 가 등록돼 있지 않고,
-        동명 `kiwoom_order_*` 가 kiwoom-sdk-mcp 로 해석되어 단일 주문 경로(D1)와
-        gw 키 비활성화 급정지(D18)를 함께 우회한다.
+        동명 `kiwoom_order_*` 가 kiwoom-sdk-mcp 로 해석되어 단일 주문 경로와
+        gw 키 비활성화 급정지를 함께 우회한다.
         """
         for rt in ("codex", "gemini"):
             with self.subTest(runtime=rt):

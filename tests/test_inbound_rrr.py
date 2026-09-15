@@ -18,8 +18,7 @@ import inbound_core as core  # noqa: E402
 import inbound_rrr as rr  # noqa: E402
 
 NOW = datetime(2026, 6, 18, 10, 50)
-SUB = {"account_id": "acct1", "symbols": ["336260", "003230"], "event_types": ["support_return", "resistance_break", "tick"],
-       "sessions": ["REG_KRX_NXT"], "expires_at": "2026-06-18T20:00:00"}
+WATCH = {"336260": {}, "003230": {}}
 CFG = {"account_id": "acct1", "operator_chat_id": "111", "inbound": {"quiet_sec": 30, "inject_max_chars": 1800, "heartbeat_timeout_sec": 0.4},
        "gw": {"base_url": "", "api_key": "tkn"}}
 
@@ -95,25 +94,23 @@ def make_server(script: Script):
 
 
 class Harness:
-    def __init__(self, script, *, cursor=None, deliver=None, sub=SUB, max_reconnects=3):
+    def __init__(self, script, *, deliver=None, watch=None, max_reconnects=3):
         self.srv, self.base = make_server(script)
         self.tmp = tempfile.TemporaryDirectory()
-        self.cursor_path = os.path.join(self.tmp.name, "events.cursor")
-        if cursor is not None:
-            open(self.cursor_path, "w").write(cursor)
+        self.watch_path = os.path.join(self.tmp.name, "watchlist.json")
+        with open(self.watch_path, "w", encoding="utf-8") as f:
+            json.dump(WATCH if watch is None else watch, f)
         self.out = []
         self.sleeps = []
         cfg = json.loads(json.dumps(CFG)); cfg["gw"]["base_url"] = self.base
         self.log = core.DeliveryLog(os.path.join(self.tmp.name, "delivery.jsonl"))
-        self.proc = core.Processor(cfg, sub, self.log, deliver=deliver or self.out.append, now_fn=lambda: NOW)
-        self.client = rr.RrrStreamClient(cfg, sub, self.proc, cursor_path=self.cursor_path, sleep=self.sleeps.append,
+        self.proc = core.Processor(cfg, core.WatchList(self.watch_path), self.log,
+                                   deliver=deliver or self.out.append, now_fn=lambda: NOW)
+        self.client = rr.RrrStreamClient(cfg, self.proc, sleep=self.sleeps.append,
                                          max_reconnects=max_reconnects, rand=lambda: 0.5)
 
     def close(self):
         self.srv.shutdown(); self.srv.server_close(); self.tmp.cleanup()
-
-    def cursor(self):
-        return open(self.cursor_path).read().strip() if os.path.exists(self.cursor_path) else None
 
 
 class SseParser(unittest.TestCase):
@@ -125,80 +122,122 @@ class SseParser(unittest.TestCase):
         self.assertEqual(got[2][1]["event"], "error")
 
 
-class UrlBuilding(unittest.TestCase):
-    def test_query_from_subscription(self):
-        url = rr.build_stream_url("http://h:1", "/events/stream", SUB, since="$")
-        q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
-        self.assertEqual(q["since"], "$")
-        self.assertEqual(q["symbols"], "336260,003230")
-        self.assertEqual(q["kinds"], "zone")
-        self.assertNotIn("evts", q)
-        self.assertNotIn("tick", q.get("kinds", ""))
+class UrlHasNoQuery(unittest.TestCase):
+    """서버에 아무것도 맡기지 않는다 — 필터도, 재개 지점도.
 
-    def test_macro_subscription_includes_symbols_filter(self):
-        url = rr.build_stream_url("http://h:1", "/events/stream", dict(SUB, event_types=["support_return", "macro"]), since="0")
-        q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
-        self.assertIn("symbols", q)
-        self.assertEqual(q["symbols"], "336260,003230")
-        self.assertEqual(q["kinds"], "zone,macro")
-        self.assertNotIn("evts", q)
+    쿼리가 하나라도 붙으면 서버가 접속 시점의 값으로 걸러 버리고, 그 값은 접속이 끝날 때까지
+    굳는다. 그러면 감시 목록을 고쳐도 듣지 않는다 — 2026-09-15 에 하루를 눈멀게 한 구조다.
+    """
 
-    def test_heartbeat_entry_parsed_as_zone_and_filtered_locally(self):
+    def test_stream_url_carries_no_parameters(self):
+        self.assertEqual(rr.build_stream_url("http://h:1"), "http://h:1/api/events/stream")
+        self.assertEqual(urlparse(rr.build_stream_url("http://h:1")).query, "")
+
+    def test_trailing_slash_does_not_double_up(self):
+        self.assertEqual(rr.build_stream_url("http://h:1/"), "http://h:1/api/events/stream")
+
+    def test_heartbeat_entry_is_delivered_when_the_symbol_is_watched(self):
+        """유형 필터가 없어졌다 — heartbeat 도 목록에 있으면 온다."""
         e = {"id": "1-0", "kind": "zone", "schema": "rrr_mon_alert_v1", "sym": "336260", "evt": "heartbeat",
              "px": "22300", "bar_ts": "2026-06-18T10:35:00", "as_of": "2026-06-18T10:35:07", "sess": "REG_KRX_NXT"}
         tagged = core.entry_to_tagged(e)
-        self.assertIsNotNone(tagged)
-        self.assertEqual(tagged["tag"], "#mon")
         self.assertEqual(tagged["kv"]["evt"], "heartbeat")
+        self.assertEqual(core.watchlist_matches(WATCH, tagged), (True, ""))
+        self.assertEqual(core.watchlist_matches({"000660": {}}, tagged), (False, "unwatched"))
 
-        # Subscribed to heartbeat -> matches
-        sub_with_hb = dict(SUB, event_types=["heartbeat"])
-        ok, reason = core.subscription_matches(sub_with_hb, tagged, NOW)
-        self.assertTrue(ok)
-        self.assertEqual(reason, "")
 
-        # Not subscribed to heartbeat -> unsubscribed
-        sub_no_hb = dict(SUB, event_types=["support_return"])
-        ok, reason = core.subscription_matches(sub_no_hb, tagged, NOW)
-        self.assertFalse(ok)
-        self.assertEqual(reason, "unsubscribed")
+class ProbeIsTheOnlyPlaceACursorLives(unittest.TestCase):
+    """`--probe` 는 연결 테스트 전용이며, `since` 를 쓰는 유일한 자리다.
+
+    운전 중에는 언제나 현시점부터 받는다 — 지나간 봉은 실시간 판단에 쓸모가 없기 때문이다.
+    그런데 연결이 살아 있는지 보려면 이야기가 다르다: `$` 로 열면 장이 조용한 동안 아무것도
+    오지 않아 "연결이 안 됐다"와 "이벤트가 없다"를 가를 수 없다. 과거 지점부터 열면 즉시
+    흘러나오므로 그 둘이 갈린다.
+
+    그래서 능력을 남기되 **배달 경로에서 떼어 둔다** — probe 는 Processor 를 만들지 않으므로
+    무엇도 세션에 넣지 못한다. 문서로만 "테스트 때만 쓰라" 고 적으면 그건 규칙이 아니다.
+    """
+
+    def test_url_carries_since_and_nothing_else(self):
+        self.assertEqual(rr.build_probe_url("http://h:1", since="0"),
+                         "http://h:1/api/events/stream?since=0")
+        q = parse_qs(urlparse(rr.build_probe_url("http://h:1", since="1750210507000-0")).query)
+        self.assertEqual(sorted(q), ["since"], "probe 에 필터가 섞였다")
+
+    def test_runtime_url_has_no_way_to_pass_a_cursor(self):
+        """운전용 URL 빌더에는 since 를 받을 자리가 아예 없다 — 넘기려 해도 TypeError 다."""
+        with self.assertRaises(TypeError):
+            rr.build_stream_url("http://h:1", since="0")
+
+    def test_reports_what_arrives_and_exits(self):
+        e1, e2 = entry(0), entry(1, sym="000660")     # 감시 목록과 무관하게 전부 보여 준다
+        script = Script([{"body": [frame(e1), ": keepalive t\n\n", frame(e2)]}])
+        srv, base = make_server(script)
+        try:
+            out = []
+            rc = rr.probe(base, "tkn", since="0", limit=2, out=out.append)
+            self.assertEqual(rc, 0, out)
+            self.assertEqual(script.seen[0][1], {"since": "0"})
+            body = "\n".join(out)
+            self.assertIn(e1["id"], body)
+            self.assertIn("000660", body, "감시 목록 밖 종목도 보여야 연결 확인이 된다")
+        finally:
+            srv.shutdown(); srv.server_close()
+
+    def test_never_touches_the_delivery_path(self):
+        """probe 가 배달 경로를 타면 테스트 한 번이 세션에 다이제스트를 밀어 넣는다."""
+        import inspect
+        src = inspect.getsource(rr.probe)
+        for forbidden in ("Processor", "deliver", "DeliveryLog", "WatchList"):
+            self.assertNotIn(forbidden, src, f"probe 가 {forbidden} 를 건드린다")
+
+    def test_start_sh_never_reaches_for_the_probe(self):
+        """기동 스크립트가 probe 를 부르면 그 순간 커서가 운전 경로로 들어온다.
+
+        "테스트 때만 쓴다" 를 문서에만 적으면 그건 규칙이 아니다 — 부를 수 있는 자리에서
+        부르지 않는지를 본다.
+        """
+        with open(os.path.join(ROOT, "bin", "start.sh"), encoding="utf-8") as f:
+            src = f.read()
+        for token in ("--probe", "--since", "build_probe_url"):
+            self.assertNotIn(token, src, f"start.sh 가 {token} 를 쓴다")
+
+    def test_reports_an_unreachable_stream(self):
+        script = Script([{"status": 401}])
+        srv, base = make_server(script)
+        try:
+            out = []
+            self.assertNotEqual(rr.probe(base, "tkn", since="0", limit=1, out=out.append), 0)
+            self.assertIn("401", "\n".join(out))
+        finally:
+            srv.shutdown(); srv.server_close()
 
 
 class StreamClient(unittest.TestCase):
-    def test_replay_frames_then_reconnect_with_cursor(self):
-        e1, e2, e3, e4 = entry(0), entry(1, evt="resistance_break"), entry(2, kind="tick"), entry(3, sym="000660")  # e4 미구독
+    def test_reconnect_does_not_replay_the_gap(self):
+        """재접속도 무쿼리다 — 끊긴 동안의 엔트리는 돌아오지 않는다.
+
+        커서를 지운 대가가 여기에 있다. 대가 자체를 테스트로 적어 둔다: 두 번째 접속 요청에
+        since 가 실리지 않는다는 것은 곧 그 구간을 포기했다는 뜻이고, 로그의
+        `gap=not_replayed` 가 그 사실을 남기는 유일한 자리다.
+        """
+        e1, e2, e3 = entry(0), entry(1, evt="resistance_break"), entry(3, sym="000660")  # e3 미감시
         script = Script([
-            {"body": [frame(e1), frame(e2), ": keepalive 2026-06-18T10:50:00\n\n", frame(e3), frame(e4)]},
+            {"body": [frame(e1), frame(e2), ": keepalive 2026-06-18T10:50:00\n\n", frame(e3)]},
             {"body": [": keepalive 2026-06-18T10:51:00\n\n"]},
             {"body": []},
         ])
         h = Harness(script, max_reconnects=2)
         try:
-            rc = h.client.run()
-            self.assertEqual(rc, 0)
-            # 첫 접속: 커서 없음 → since=$ ; 재접속: since=마지막 처리 id
-            self.assertEqual(script.seen[0][1]["since"], "$")
+            self.assertEqual(h.client.run(), 0)
+            for i, (_path, q, _hdr) in enumerate(script.seen):
+                self.assertEqual(q, {}, f"{i}번째 접속에 쿼리가 실렸다: {q}")
             hdrs = {k.lower(): v for k, v in script.seen[0][2].items()}
             self.assertEqual(hdrs.get("x-api-key"), "tkn")
-            self.assertEqual(script.seen[1][1]["since"], e4["id"])
-            self.assertEqual(h.cursor(), e4["id"])
-            digests = [ln for ln in h.out if ln.startswith("[digest")]
-            self.assertEqual(len(digests), 2)  # 10:35 zone×2, tick 10:40
-            self.assertIn("n=2]", digests[0])
+            self.assertEqual(sum(1 for ln in h.out if ln.startswith("[digest")), 1)
             rows = [json.loads(x) for x in open(h.log.path, encoding="utf-8")]
-            self.assertIn(("skip", "unsubscribed"), [(r["kind"], r.get("reason")) for r in rows])
-            self.assertTrue(all(r.get("source") == "rrr_stream" for r in rows if r.get("kind") != "market_check"))  # wake 행은 소스 무관
-            self.assertEqual(h.sleeps, [1.0, 2.0])  # backoff 1→2 (rand=0.5 → 지터 0)
-        finally:
-            h.close()
-
-    def test_explicit_since_override(self):
-        script = Script([{"body": []}])
-        h = Harness(script, max_reconnects=0)
-        try:
-            h.client.since_override = "0"
-            h.client.run()
-            self.assertEqual(script.seen[0][1]["since"], "0")
+            self.assertIn(("skip", "unwatched"), [(r["kind"], r.get("reason")) for r in rows])
+            self.assertEqual(h.sleeps, [1.0, 2.0])   # backoff 1→2 (rand=0.5 → 지터 0)
         finally:
             h.close()
 
@@ -241,27 +280,6 @@ class StreamClient(unittest.TestCase):
         finally:
             h.close()
 
-    def test_cursor_advances_only_after_processing(self):
-        calls = {"n": 0}
-
-        def flaky_deliver(text):
-            if not text.startswith("[digest"):  # market-check wake 는 best-effort라 이 검사의 대상이 아니다
-                return
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("pane gone")
-
-        e1 = entry(0)
-        script = Script([{"body": [frame(e1)]}])
-        h = Harness(script, deliver=flaky_deliver, max_reconnects=0)
-        try:
-            # 다이제스트는 finalize/flush 때 배달된다 → 배달 실패는 run() 종료 시점에 드러난다
-            with self.assertRaises(RuntimeError):
-                h.client.run()
-            self.assertIsNone(h.cursor())  # 처리(배달) 전에는 커서를 쓰지 않는다 → 재실행 시 재처리(at-least-once)
-        finally:
-            h.close()
-
     def test_market_check_wake_on_keepalive_shares_core(self):
         # rrr 소스도 같은 core.Processor.tick 을 타므로 창 안(NOW=10:50)에서 keepalive 만 와도 wake 1줄. 다이제스트와 독립
         e1 = entry(0)
@@ -276,25 +294,7 @@ class StreamClient(unittest.TestCase):
         finally:
             h.close()
 
-    def test_once_replays_pages_from_cursor_and_exits(self):
-        e1, e2 = entry(0), entry(1, kind="tick")
-        pages = [
-            {"schema": "events.1.0", "entries": [e1], "next_since": e1["id"], "count": 1, "truncated": True},
-            {"schema": "events.1.0", "entries": [e2], "next_since": e2["id"], "count": 1, "truncated": False},
-        ]
-        script = Script([], replay_pages=pages)
-        h = Harness(script, cursor="1750210500000-0")
-        try:
-            self.assertEqual(h.client.run(once=True), 0)
-            self.assertEqual([s[0] for s in script.seen], ["/api/events", "/api/events"])
-            self.assertEqual(script.seen[0][1]["since"], "1750210500000-0")
-            self.assertEqual(script.seen[1][1]["since"], e1["id"])
-            self.assertEqual(h.cursor(), e2["id"])
-            self.assertEqual(sum(1 for ln in h.out if ln.startswith("[digest")), 2)
-        finally:
-            h.close()
-
-    def test_agent_blocked_cursor_does_not_advance(self):
+    def test_agent_blocked_keeps_the_digest_queued(self):
         def blocked_deliver(text):
             if text.startswith("[digest"):
                 raise core.HerdrBlockedError("agent_blocked")
@@ -304,12 +304,12 @@ class StreamClient(unittest.TestCase):
         h = Harness(script, deliver=blocked_deliver, max_reconnects=0)
         try:
             h.client.run()
-            # agent_blocked 거부 시 커서는 전진하지 않는다!
-            self.assertIsNone(h.cursor())
+            # 거부된 다이제스트는 버려지지 않고 큐에 남는다(깊이 3).
+            self.assertEqual(len(h.proc.delivery_queue), 1)
         finally:
             h.close()
 
-    def test_queue_overflow_advances_cursor_past_discarded_item(self):
+    def test_queue_overflow_discards_the_oldest_and_marks_it(self):
         def blocked_deliver(text):
             if text.startswith("[digest"):
                 raise core.HerdrBlockedError("agent_blocked")
@@ -323,10 +323,11 @@ class StreamClient(unittest.TestCase):
         h = Harness(script, deliver=blocked_deliver, max_reconnects=0)
         try:
             h.client.run()
-            # 4 bars while blocked -> queue depth 3 exceeded -> oldest (e1) discarded!
-            # Discarded item commits cursor so it won't be refetched!
-            self.assertEqual(h.cursor(), e1["id"])
+            # 막힌 채 4봉 → 큐 깊이 3 초과 → 가장 오래된 e1 폐기. 버린 사실은 숨기지 않는다:
+            # 다음 다이제스트 머리에 [생략 n봉] 이 붙는다.
             self.assertEqual(h.proc.skipped_bars, 1)
+            rows = [json.loads(x) for x in open(h.log.path, encoding="utf-8")]
+            self.assertIn("delivery_queue_overflow", [r.get("reason") for r in rows])
         finally:
             h.close()
 

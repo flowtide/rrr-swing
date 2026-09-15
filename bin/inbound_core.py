@@ -2,10 +2,11 @@
 """rrr-swing 인바운드 코어 — 소스(Telegram 태그 / rrr 스트림 엔트리)에 무관한 공통 부분.
 
 결정 3: 이 코드는 매매를 결정하지 않는다. 배달만 한다.
-공개 API: parse_tag_line, entry_to_tagged, subscription_matches, DigestBuffer, format_digest,
-deliver_stdout|file|herdr, DeliveryLog, Processor(handle_event, tick, finalize), market_check_slot, load_config, load_subscriptions.
+공개 API: parse_tag_line, entry_to_tagged, watchlist_matches, WatchList, DigestBuffer, format_digest,
+deliver_stdout|file|herdr, DeliveryLog, Processor(handle_event, tick, finalize), market_check_slot, load_config.
 - tick 은 30분 시장 체크 wake 도 낸다: 창(inbound.market_check, 기본 09:00~15:30 매 30분) 안에서 슬롯마다 "[market-check ts=HH:MM]" 1줄. 내용은 시각뿐.
-- 유효한 구독 선언(local/subscriptions.json)에 해당하는 이벤트만 계좌당 봉당 1건 다이제스트(digest_id=(account_id, bar_ts))로 넘긴다.
+- 감시 목록(local/watchlist.json)의 종목 이벤트와 종목 없는 이벤트(macro)를 계좌당 봉당 1건 다이제스트(digest_id=(account_id, bar_ts))로 넘긴다.
+- 목록은 **이벤트가 올 때마다** 확인한다(mtime). 기동 시 1회 고정하면 세션이 자기 눈을 런타임에 고칠 수 없다.
 - 암묵 필터 없음: 미매칭·검증 실패는 배달 로그(local/delivery.jsonl)에 reason 으로만 남긴다.
 - 계약 원본: rrr-gw-skills `rrr-mon-alert-consumer-reference.md` §4, `frontend_api_reference.md` §2.16·§2.17
 """
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -25,13 +27,10 @@ TAG_SCHEMAS = {
     "#mon-tick": ("rrr_mon_tick_v1", ("schema", "sym", "bar_ts", "o", "h", "l", "c", "v", "watch_id")),
     "#macro": ("rrr_mon_macro_v1", ("schema", "sess", "as_of")),
 }
+SYMBOL_RE = re.compile(r"^[0-9A-Z]{6}$")   # 이벤트의 sym 과 감시 목록이 공유하는 정본
 ZONE_EVENTS = ("support_enter", "support_return", "support_break",
                "resistance_enter", "resistance_return", "resistance_break",
                "heartbeat")
-# 공급자가 내는 세션 토큰 전량. 구독의 sessions 는 이 안에서 고른다.
-SESSION_TOKENS = ("PRE_NXT", "PRE_TO_REG_BREAK", "REG_KRX_NXT", "REG_TO_POST_BREAK", "POST_NXT")
-# 구독 event_types 가 덮어야 하는 전체 유형 = zone 6종 + heartbeat + macro.
-SUBSCRIBABLE_EVENT_TYPES = ZONE_EVENTS + ("macro",)
 # 30분 시장 체크 wake 의 기본값(창·주기). config inbound.market_check 가 덮는다. every_min 0 = 끔.
 MARKET_CHECK_DEFAULTS = {"every_min": 30, "from": "09:00", "to": "15:30"}
 
@@ -97,34 +96,86 @@ def _event_type(tagged: dict) -> str:
     return "macro"
 
 
-def subscription_matches(sub: dict, tagged: dict, now: datetime) -> tuple[bool, str]:
-    """구독 선언과 태그의 매칭. (True, "") 또는 (False, reason).
+def watchlist_matches(watch, tagged: dict) -> tuple[bool, str]:
+    """감시 목록과 태그의 매칭. (True, "") 또는 (False, "unwatched").
 
-    reason ∈ subscription_expired | unsubscribed | session_unknown | session_mismatch
-    - 종목 매칭: #mon / #mon-tick 은 sym ∈ symbols. #macro 는 종목 없음.
-    - 유형 매칭: #mon 은 evt, #mon-tick 은 'tick', #macro 는 'macro' 가 event_types 에 명시돼야 한다.
-    - 세션 매칭: sess 가 있는 태그(#mon, #macro)만. sess 부재 = 세션 미상 → session_unknown.
+    규칙은 한 문장이다: **sym 이 있으면 목록에 있어야 하고, 없으면 항상 배달한다.**
+
+    뒷절이 필요한 이유 — #macro 에는 종목이 없다. 종목 규칙만 두면 그 유형은 어떤 목록으로도
+    도달할 수 없다. 시장 전체 이벤트는 목록과 무관하게 통과시킨다.
+
+    세션(sess)·유형(evt)은 배달 여부를 정하지 않는다. 공급자는 sess 를 **주문정책 정보**로
+    내며(장전=지정가만·본장=SOR·동시호가=취소만) 그 선택은 세션의 몫이다. 두 값은 태그 줄에
+    실려 그대로 도달한다. 세션 목록으로 배달을 거르면 장 마감 뒤 좁힌 값이 다음 거래일까지
+    살아남아, 보유 종목의 신호가 전부 버려지고도 조용한 장과 구분되지 않는다.
     """
-    exp = sub.get("expires_at")
-    if exp:
-        try:
-            if now > datetime.fromisoformat(exp):
-                return False, "subscription_expired"
-        except ValueError:
-            return False, "subscription_expired"
-    kv = tagged["kv"]
-    if tagged["tag"] in ("#mon", "#mon-tick") and kv.get("sym") not in set(sub.get("symbols") or []):
-        return False, "unsubscribed"
-    if _event_type(tagged) not in set(sub.get("event_types") or []):
-        return False, "unsubscribed"
-    if tagged["tag"] in ("#mon", "#macro"):
-        sess = kv.get("sess")
-        if not sess:
-            return False, "session_unknown"
-        if sess not in set(sub.get("sessions") or []):
-            return False, "session_mismatch"
+    sym = tagged["kv"].get("sym")
+    if sym is None:
+        return True, ""
+    if sym not in watch:
+        return False, "unwatched"
     return True, ""
 
+
+class WatchList:
+    """local/watchlist.json — **이벤트가 올 때마다** 확인한다.
+
+    기동 시 1회 읽어 고정하면 세션이 목록을 고쳐도 돌고 있는 어댑터는 알지 못한다 — 자기
+    눈을 자기가 고칠 수 없다. 그래서 매 이벤트마다 확인하되, mtime 이 바뀌었을 때만 다시
+    읽어 비용을 stat 1회로 묶는다.
+
+    받는 형태 두 가지 — 사람이 손으로 고치는 파일이라 둘 다 받는다:
+        {"006800": {"note": "보유 120주"}, "042700": {}}
+        ["006800", "042700"]
+
+    `problem` 은 "목록이 정상이 아니다"를 한 줄로 말한다(정상이면 빈 문자열). 빈 목록은
+    "아무것도 안 보겠다"는 의도일 수 있어 정상으로 둔다. 파일 부재·손상·종목 코드가 아닌
+    항목은 의도가 아니며, 그 상태에서는 종목 이벤트가 전부 버려진다 — 알리지 않으면 조용한
+    장과 구분되지 않는다.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+        self._mtime: int | None = None
+        self._syms: dict = {}
+        self.problem: str = ""
+
+    def symbols(self) -> dict:
+        try:
+            mtime = os.stat(self.path).st_mtime_ns
+        except FileNotFoundError:
+            self._mtime, self._syms = None, {}
+            self.problem = f"감시 목록 파일이 없다({self.path}) — 종목 이벤트가 하나도 배달되지 않는다"
+            return self._syms
+        except OSError as exc:
+            self._mtime, self._syms = None, {}
+            self.problem = f"감시 목록을 열 수 없다({self.path}): {type(exc).__name__}: {exc}"
+            return self._syms
+        if mtime == self._mtime:
+            # problem 을 지우지 않는다 — 깨진 채 도는 상태는 파일이 고쳐질 때까지 계속 문제다.
+            return self._syms
+        self._mtime = mtime
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                raw = json.load(f)
+        except Exception as exc:  # noqa: BLE001
+            # 마지막 정상값을 지킨다. 여기서 빈 목록을 돌려주면 파일 오타 하나로
+            # 그 순간 조용히 눈이 먼다.
+            self.problem = f"감시 목록을 읽을 수 없다: {type(exc).__name__}: {exc}"
+            return self._syms
+        if isinstance(raw, list):
+            items = {str(s): {} for s in raw}
+        elif isinstance(raw, dict):
+            items = {str(k): (v if isinstance(v, dict) else {}) for k, v in raw.items()}
+        else:
+            self.problem = f"감시 목록의 최상위가 객체도 배열도 아니다: {type(raw).__name__}"
+            return self._syms
+        # 이벤트의 sym 은 순수 6자리다. `_AL` 접미사나 오타는 어떤 이벤트와도 맞지 않으므로,
+        # 그대로 실으면 "적어 뒀는데 왜 안 오지" 가 되고 원인은 어디에도 남지 않는다.
+        bad = sorted(k for k in items if not SYMBOL_RE.fullmatch(k))
+        self._syms = {k: v for k, v in items.items() if k not in set(bad)}
+        self.problem = f"종목 코드가 아닌 항목을 버렸다: {bad}" if bad else ""
+        return self._syms
 
 
 # ---------------------------------------------------------------- rrr 스트림 엔트리 → tagged (파리티)
@@ -286,8 +337,8 @@ def deliver_herdr(text: str, target: str, run=None, *,
       백오프 재시도. 창을 넘기면 마지막 실패를 CalledProcessError 로 올린다(어댑터 exit 3).
       한 번의 일시적 실패로 상주 프로세스가 끝나면 rs-lead 는 눈을 잃는다.
 
-    재시도 중에는 SSE 를 읽지 않지만 커서는 아직 전진하지 않았으므로(at-least-once),
-    끊겨도 재접속 뒤 같은 지점부터 이어진다.
+    재시도 중에는 SSE 를 읽지 않으며, 그 사이에 온 엔트리는 오지 않는다 — 재개 지점을 들고
+    있지 않다. 지나간 봉은 실시간 판단에 쓸모가 없으므로 되짚지 않는다.
     """
     import subprocess
     import time
@@ -351,27 +402,26 @@ class DeliveryLog:
 # ---------------------------------------------------------------- 처리기 (소스 무관)
 
 class Processor:
-    """tagged → 구독 매칭 → 다이제스트 → 배달. 판단 0. 소스별 변환은 호출자(inbound_rrr)가 한다."""
+    """tagged → 감시 목록 매칭 → 다이제스트 → 배달. 판단 0. 소스별 변환은 호출자(inbound_rrr)가 한다."""
 
-    def __init__(self, cfg: dict, sub: dict, log: DeliveryLog, deliver, now_fn=None, redeliver: bool = False):
+    def __init__(self, cfg: dict, watch: WatchList, log: DeliveryLog, deliver, now_fn=None, redeliver: bool = False):
         self.cfg = cfg
-        self.sub = sub
+        self.watch = watch
         self.log = log
         self.deliver = deliver
         self.now_fn = now_fn or datetime.now
         self.redeliver = redeliver
         inbound = cfg.get("inbound") or {}
         self.max_chars = int(inbound.get("inject_max_chars", 1800))
-        account = sub.get("account_id") or cfg.get("account_id") or "account"
+        account = cfg.get("account_id") or "account"
         self.buf = DigestBuffer(account, int(inbound.get("quiet_sec", 30)))
         self._already = set() if redeliver else log.delivered_ids()
         self.market_check = {**MARKET_CHECK_DEFAULTS, **{k: v for k, v in (inbound.get("market_check") or {}).items() if not str(k).startswith("_")}}
         self._mc_last: tuple[str, str] | None = None  # (date, slot) 마지막 wake — 슬롯당 1회
+        self._watch_seen: set[tuple[str, str]] = set()  # (date, problem) 목록 이상 통지 — 하루 1회
         self.stats = {"updates": 0, "digests": 0, "market_checks": 0, "skipped": {}}
         self.delivery_queue: list[dict] = []
         self.skipped_bars: int = 0
-        self.cursor_committed_ref: str | None = None
-        self._last_seen_ref: str | None = None
 
     def _now(self) -> str:
         return self.now_fn().isoformat(timespec="seconds")
@@ -383,16 +433,12 @@ class Processor:
             rec.update(extra)
         self.log.append(rec)
 
-    def _deliver_one(self, d: dict, commit_last_seen: bool = False) -> None:
+    def _deliver_one(self, d: dict) -> None:
         skipped = self.skipped_bars
         lines = format_digest(d, self.max_chars, skipped_bars=skipped)
         for line in lines:
             self.deliver(line)
         self.skipped_bars = 0
-        if d.get("refs"):
-            self.cursor_committed_ref = d["refs"][-1]
-        if commit_last_seen and self.buf.is_empty() and self._last_seen_ref:
-            self.cursor_committed_ref = self._last_seen_ref
         self._already.add(d["digest_id"])
         self.stats["digests"] += 1
         # 본문을 남긴다. 메타만 남기면 "무슨 이벤트로 그 판단을 했나" 를 사후에 복원할 수 없다 —
@@ -406,8 +452,6 @@ class Processor:
         while len(self.delivery_queue) > 3:
             discarded = self.delivery_queue.pop(0)
             self.skipped_bars += 1
-            if discarded.get("refs"):
-                self.cursor_committed_ref = discarded["refs"][-1]
             self._skip("delivery_queue_overflow", source=discarded.get("source"),
                        ref=discarded.get("refs")[-1] if discarded.get("refs") else None,
                        extra={"digest_id": discarded["digest_id"]})
@@ -415,9 +459,8 @@ class Processor:
     def _try_flush_queue(self) -> bool:
         while self.delivery_queue:
             item = self.delivery_queue[0]
-            is_last = (len(self.delivery_queue) == 1)
             try:
-                self._deliver_one(item, commit_last_seen=is_last)
+                self._deliver_one(item)
             except HerdrBlockedError:
                 return False
             self.delivery_queue.pop(0)
@@ -434,40 +477,59 @@ class Processor:
             if not all_flushed:
                 self._enqueue_and_trim(d)
                 continue
-            is_last = (i == len(digests) - 1)
             try:
-                self._deliver_one(d, commit_last_seen=is_last)
+                self._deliver_one(d)
             except HerdrBlockedError:
                 self._enqueue_and_trim(d)
 
     def handle_event(self, tagged: dict | None, *, source: str, ref: str | None = None, extra: dict | None = None) -> str:
         """이벤트 1건. 반환: delivered|buffered|skip:<reason>. tagged=None 은 bad_tag."""
         self.stats["updates"] += 1
-        if ref:
-            self._last_seen_ref = ref
         now = self.now_fn()
         if tagged is None:
             self._skip("bad_tag", source=source, ref=ref, extra=extra)
-            if ref and self.buf.is_empty() and not self.delivery_queue:
-                self.cursor_committed_ref = ref
             return "skip:bad_tag"
-        ok, reason = subscription_matches(self.sub, tagged, now)
+        # 목록은 매 이벤트마다 확인한다 — 세션이 고치면 그 다음 이벤트부터 바로 듣는다.
+        watch = self.watch.symbols()
+        if self.watch.problem:
+            self._watchlist_problem(self.watch.problem, now)
+        ok, reason = watchlist_matches(watch, tagged)
         if not ok:
             self._skip(reason, source=source, ref=ref, extra=extra)
-            if ref and self.buf.is_empty() and not self.delivery_queue:
-                self.cursor_committed_ref = ref
             return f"skip:{reason}"
         status, flushed = self.buf.add(tagged, now, source=source, ref=ref)
         if status == "duplicate":
             self._skip("duplicate", source=source, ref=ref, extra=extra)
-            if ref and self.buf.is_empty() and not self.delivery_queue:
-                self.cursor_committed_ref = ref
             return "skip:duplicate"
         self._emit_digests(flushed)
         return "buffered"
 
     def buffer_empty(self) -> bool:
         return self.buf.is_empty() and len(self.delivery_queue) == 0
+
+    def _watchlist_problem(self, problem: str, now: datetime) -> None:
+        """목록이 정상이 아닌 상태를 세션에 알린다.
+
+        이 상태에서는 종목 이벤트가 전부 버려지는데, 어댑터는 살아 있고 배달 로그만 쌓인다 —
+        세션에게는 조용한 장과 똑같이 보이고, 배달 로그는 아무도 매번 읽지 않는다.
+
+        같은 문제를 하루에 한 번만 알린다. 장 하나에 이벤트는 수십 건 오므로 매번 깨우면
+        그게 소음이 되어 무시된다. 문제가 달라지면 다시 알린다.
+        """
+        key = (now.date().isoformat(), problem)
+        if key in self._watch_seen:
+            return
+        self._watch_seen.add(key)
+        text = f"[watchlist-problem] {problem}. bin/watchlist.py show 로 확인하라."
+        try:
+            self.deliver(text)
+        except Exception as exc:  # noqa: BLE001 - market-check 와 같은 규칙: 통지 실패가 어댑터를 멈추지 않는다
+            self._skip("watchlist_problem_deliver_failed", source="adapter", ref=self.watch.path,
+                       extra={"error": f"{type(exc).__name__}: {exc}"})
+            return
+        # 다이제스트와 같은 이유로 남긴다 — pane 에만 들어가면 세션이 끝나는 순간 사라진다.
+        self.log.append({"ts": self._now(), "kind": "watchlist_problem", "problem": problem,
+                         "lines": [text]})
 
     def _market_check(self, now: datetime) -> None:
         """30분 시장 체크 wake: 창 안에서 슬롯이 바뀔 때 1줄. 내용은 시각뿐 — 시장을 읽는 것은 세션의 일이다. 다이제스트와 독립, 소스 공통."""
@@ -504,13 +566,6 @@ class Processor:
 
 def load_config(path: str) -> dict:
     import json
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_subscriptions(path: str) -> dict:
-    if not os.path.exists(path):
-        return {"symbols": [], "event_types": [], "sessions": [], "expires_at": ""}
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 

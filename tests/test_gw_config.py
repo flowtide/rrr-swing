@@ -94,12 +94,8 @@ class GwConfigTest(unittest.TestCase):
         self.assertNotIn("Authorization", hdrs)
 
     def test_inbound_rrr_build_stream_url_defaults_to_fixed_path(self):
-        sub = {"symbols": ["005930"], "event_types": ["support_return"]}
-        url = rr.build_stream_url("http://gw:15410", sub, since="$")
-        from urllib.parse import parse_qs, urlparse
-        q = parse_qs(urlparse(url).query)
-        self.assertEqual(q.get("since"), ["$"])
-        self.assertEqual(q.get("symbols"), ["005930"])
+        # 경로는 고정이고 쿼리는 없다 — 필터도 재개 지점도 서버에 맡기지 않는다.
+        self.assertEqual(rr.build_stream_url("http://gw:15410"), "http://gw:15410/api/events/stream")
 
     def _launch(self, gw_cfg, env_extra=None):
         """실기동 경로로 start.sh 를 돌린다.

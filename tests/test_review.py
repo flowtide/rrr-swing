@@ -57,15 +57,16 @@ class ReviewComputeTest(unittest.TestCase):
     def test_vocabulary_matches_canonical_source(self):
         """원장·리뷰의 어휘는 inbound_core 하나에서 온다.
 
-        heartbeat(D13) 가 빠지면 그 이벤트로 내린 decision 이 전환율 행렬에서 조용히
-        빠지고 label_missing 으로 잡힌다. tick(D12) 이 남으면 폐기된 타입이 통과한다.
+        heartbeat 가 빠지면 그 이벤트로 내린 decision 이 전환율 행렬에서 조용히
+        빠지고 label_missing 으로 잡힌다. tick 이 남으면 폐기된 타입이 통과한다.
         """
         self.assertEqual(list(lg.ZONE_EVENTS), LABELS)
         self.assertEqual(list(lg.ACTIONS), ACTIONS)
         self.assertEqual(list(rv.LABELS), LABELS)
         self.assertIn("heartbeat", lg.ZONE_EVENTS)
-        self.assertNotIn("tick", lg.SUBSCRIBABLE_EVENT_TYPES)
-        self.assertEqual(list(lg.SUBSCRIBABLE_EVENT_TYPES), LABELS + ["macro"])
+        # SUBSCRIBABLE_EVENT_TYPES 는 폐기됐다 — 유형으로 배달을 거르지 않으므로
+        # "구독 가능한 유형"이라는 개념 자체가 없어졌다(감시 목록은 종목만 본다).
+        self.assertFalse(hasattr(lg, "SUBSCRIBABLE_EVENT_TYPES"))
 
     def test_conversion_cells_cover_label_by_action_and_na_for_empty(self):
         r = self.compute([])

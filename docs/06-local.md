@@ -23,8 +23,7 @@ local/
   consults/  reports/ ③ 증거
 
   system-prompts/    ④ 코드 소유  손대지 않는다
-  subscriptions.json ④ 코드 소유
-  events.cursor      ④ 코드 소유
+  watchlist.json     ② 세션 소유 — 감시 종목. 어댑터가 이벤트마다 읽는다
   inbound.log  inbound.pid  delivery.jsonl
 ```
 
@@ -52,8 +51,7 @@ local/
 | `consults/<id>.json` | 손절·청산 협의 | `bin/consult.py` |
 | `reports/<날짜>.md` | 운영자 보고(console 채널) | `bin/report.py` · `bin/order.py` |
 | `system-prompts/<날짜>.md` | 기동 컨텍스트 산출물 | `bin/context_load.py`(매 기동 덮어쓴다) |
-| `subscriptions.json` | 구독 선언 — 어댑터의 권위 필터 | `bin/subscribe.py` |
-| `events.cursor` | 마지막으로 처리한 이벤트 id | `bin/inbound_rrr.py` |
+| `watchlist.json` | 감시 종목 — 어댑터의 유일한 필터. **이벤트마다** 읽으므로 고치면 바로 듣는다 | `bin/watchlist.py` |
 | `delivery.jsonl` | 배달 시도 기록(다이제스트·market-check·실패) | 인바운드 어댑터 |
 | `inbound.log` · `inbound.pid` | 어댑터 로그 · pid | `bin/start.sh` |
 
@@ -68,8 +66,7 @@ local/
 | `packets/` | 원장 `decision_ref` 가 없는 파일을 가리킨다 — 원장은 깨지지 않지만(존재를 검사하지 않는다) 복기 때 **원문 대조가 불가능**해진다 |
 | `consults/` | 원장 `consult_ref` 가 같은 방식으로 끊긴다 |
 | `stories/` | `scripts/flags.py` 가 만료·재검토를 판정할 근거를 잃는다 |
-| `events.cursor` | 다음 기동이 처음부터 읽어 **이미 본 이벤트를 다시 배달**한다 |
-| `subscriptions.json` | 선언이 비어 아무 이벤트도 배달되지 않는다. 세션이 다시 선언해야 한다 |
+| `watchlist.json` | 목록이 비어 종목 이벤트가 배달되지 않는다(macro 는 온다). 세션이 다시 적어야 한다 |
 | `memory/` 의 과거 날짜 파일 | 그날 세션이 무엇을 들고 무엇을 보았는지가 사라진다 |
 | `system-prompts/` | 다음 기동에 재생성된다. 그날의 기록만 잃는다 |
 | `inbound.log` · `inbound.pid` · 빈 골격 디렉터리 | 동작에 영향 없다. 골격은 `bin/init_local.sh` 가 다시 만든다 |

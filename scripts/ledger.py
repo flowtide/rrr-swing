@@ -20,7 +20,7 @@ import sys
 from datetime import datetime
 
 # 이벤트 어휘의 정본은 inbound_core 하나다. 여기서 다시 적으면 갈린다 — 실제로 갈려서
-# heartbeat(D13)가 빠지고 폐기된 tick(D12)이 남아, 배달되는 이벤트를 원장이 도메인 밖으로
+# heartbeat 가 빠지고 폐기된 tick 이 남아, 배달되는 이벤트를 원장이 도메인 밖으로
 # 판정했다. 원장 고유 어휘(ACTIONS·TRIGGERS 등)만 여기서 정의한다.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin"))
 import inbound_core as _core  # noqa: E402
@@ -29,7 +29,6 @@ SCHEMA = "rrr_swing_ledger_v1"
 DEFAULT_LEDGER = "local/ledger.jsonl"
 
 ZONE_EVENTS = _core.ZONE_EVENTS                      # 6종 + heartbeat
-SUBSCRIBABLE_EVENT_TYPES = _core.SUBSCRIBABLE_EVENT_TYPES  # ZONE_EVENTS + macro
 ACTIONS = ("enter", "add", "hold", "exit", "no_action")
 TRIGGERS = ("event", "schedule", "operator", "flag")
 CK_KEYS = tuple(f"CK-{i}" for i in range(1, 8))
@@ -40,7 +39,9 @@ EVENT_SCHEMA: dict[str, dict] = {
     "plan_created": {"required": ["plan_id", "sym", "account_id", "entry_zone", "allocation_pct", "horizon_d", "conviction", "invalidation_conditions"],
                      "enums": {"conviction": CONVICTIONS}},
     "plan_activated": {"required": ["plan_id"], "enums": {}},
-    "subscription": {"required": ["symbols", "event_types", "sessions", "expires_at"], "enums": {}},
+    # 감시 목록 선언. 필드는 종목뿐이다 — 세션·유형·만료로는 거르지 않는다.
+    # 검사는 required 만 보므로 추가 필드를 가진 행도 유효하다(append-only).
+    "subscription": {"required": ["symbols"], "enums": {}},
     "decision": {"required": ["decision_id", "trigger", "event_label", "sym", "checklist", "action", "rationale"],
                  "enums": {"trigger": TRIGGERS, "event_label": ZONE_EVENTS + ("none",), "action": ACTIONS}},
     "order": {"required": ["decision_ref", "sym", "side", "px", "qty", "dup_key"], "enums": {"side": ("buy", "sell")}},
@@ -96,10 +97,6 @@ def validate_event(evt: str, data: dict) -> list[str]:
             problems.append("invalidation_conditions must be a list")
     if evt == "safety_check" and data.get("result") == "reject" and not data.get("rule_id"):
         problems.append("reject requires rule_id")
-    if evt == "subscription":
-        bad = [e for e in (data.get("event_types") or []) if e not in SUBSCRIBABLE_EVENT_TYPES]
-        if bad:
-            problems.append(f"event_types outside domain: {bad}")
     return problems
 
 

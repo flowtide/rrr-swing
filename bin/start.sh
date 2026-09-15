@@ -10,7 +10,7 @@
 #   bin/start.sh --role exec --dry-launch # 점검·어댑터 없이 런타임 명령만 exec(스텁 테스트)
 #
 # 이 스크립트가 지키는 것:
-# - 역할은 herdr 에이전트 이름으로 나눈다(D15). 런타임은 껍데기이며 계약은 AGENTS.md 에 있다.
+# - 역할은 herdr 에이전트 이름으로 나눈다. 런타임은 껍데기이며 계약은 AGENTS.md 에 있다.
 # - lead 는 claude 고정, exec 만 런타임을 고른다. lead 의 기억은 --append-system-prompt-file
 #   로 들어가는데(docs/05-context.md) agy 에 대응 플래그가 없다 — 막지 않으면 기억 없는
 #   lead 가 정상 기동한 얼굴로 뜬다.
@@ -27,7 +27,7 @@ cd "$(dirname "$0")/.."
 RS_TARGET="${RS_TARGET:-}"
 RS_CONFIG="${RS_CONFIG:-config/config.json}"
 RS_LOCAL="${RS_LOCAL:-local}"
-ROLE="lead"; RUNTIME="claude"; ADAPTER_ONLY=0; DELIVER="herdr"; SOURCE=""; SINCE=""; CHECK_ONLY=0; DRY_LAUNCH=0
+ROLE="lead"; RUNTIME="claude"; ADAPTER_ONLY=0; DELIVER="herdr"; SOURCE=""; CHECK_ONLY=0; DRY_LAUNCH=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --role) ROLE="$2"; shift 2 ;;
@@ -36,7 +36,6 @@ while [ $# -gt 0 ]; do
     --deliver) DELIVER="$2"; shift 2 ;;
     --target|--pane) RS_TARGET="$2"; shift 2 ;;   # 배달 대상 herdr 역할 이름
     --source) SOURCE="$2"; shift 2 ;;             # rrr_stream(유일)
-    --since) SINCE="$2"; shift 2 ;;               # 0 | <stream id> | $ (기본: 커서, 없으면 $)
     --check-only) CHECK_ONLY=1; shift ;;
     --dry-launch) DRY_LAUNCH=1; shift ;;
     *) echo "unknown arg: $1"; exit 2 ;;
@@ -44,8 +43,8 @@ while [ $# -gt 0 ]; do
 done
 case "$ROLE" in lead|exec) ;; *) echo "ERROR: --role 은 lead|exec (현재: $ROLE)"; exit 2 ;; esac
 # codex 는 목록에 없다 — 이 머신의 codex 에는 kiwoom-gw 가 등록돼 있지 않고, 동명
-# kiwoom_order_* 가 kiwoom-sdk-mcp 로 해석되어 단일 주문 경로(D1)와 gw 키 비활성화
-# 급정지(D18)를 함께 우회한다. 넣으려면 그 등록부터다.
+# kiwoom_order_* 가 kiwoom-sdk-mcp 로 해석되어 단일 주문 경로와 gw 키 비활성화
+# 급정지를 함께 우회한다. 넣으려면 그 등록부터다.
 case "$RUNTIME" in claude|agy) ;; *) echo "ERROR: --runtime 은 claude|agy (현재: $RUNTIME)"; exit 2 ;; esac
 if [ "$RUNTIME" = "agy" ] && [ "$ROLE" != "exec" ]; then
   echo "ERROR: --runtime agy 는 --role exec 에서만 쓴다 (현재 role=$ROLE)"
@@ -72,7 +71,7 @@ if [ -z "$RS_TARGET" ]; then
   fi
 fi
 
-# --- ② herdr pane 확정 (D15) ----------------------------------------------------
+# --- ② herdr pane 확정 ----------------------------------------------------
 # 이름이 이미 있기를 요구하면 순환이다: 그 이름이 붙을 에이전트를 만드는 것이 이 스크립트고,
 # 에이전트가 없는 pane 은 `herdr agent list` 에 나오지 않는다. 그래서 이름은 ⑥ 이후에 붙인다.
 #
@@ -134,7 +133,7 @@ if [ "$DRY_LAUNCH" != "1" ]; then   # ↓ --dry-launch 는 ③ 후반과 ④ 를
 # 원장·마크의 무결성이 복기의 분모다.
 python3 bin/inbound_core.py --selftest >/dev/null || { echo "ERROR: inbound(core) selftest FAILED"; exit 1; }
 python3 bin/inbound_rrr.py --selftest >/dev/null || { echo "ERROR: inbound(rrr) selftest FAILED"; exit 1; }
-python3 bin/subscribe.py show >/dev/null || { echo "ERROR: subscribe show FAILED"; exit 1; }
+python3 bin/watchlist.py show >/dev/null || { echo "ERROR: watchlist show FAILED"; exit 1; }
 python3 scripts/ledger.py selftest >/dev/null || { echo "ERROR: ledger selftest FAILED"; exit 1; }
 python3 scripts/rt_calc.py selftest >/dev/null || { echo "ERROR: rt_calc selftest FAILED"; exit 1; }
 python3 scripts/marks.py --selftest >/dev/null || { echo "ERROR: marks selftest FAILED"; exit 1; }
@@ -147,15 +146,15 @@ if [ "$ROLE" = "lead" ]; then
   # --- ④ 인바운드 어댑터 ---------------------------------------------------------
   # 고아 어댑터만 표적 정리. 대상은 **내가 관리하는 어댑터**뿐이라 두 가지로 좁힌다.
   #   (a) 스크립트가 실행 파일 자리(argv[0]|argv[1])에 있을 것. `pgrep -f` 는 명령줄 어디에든
-  #       문자열이 있으면 잡는데, 부트 프롬프트에 `python3 bin/inbound_rrr.py --once` 가 적혀
-  #       있어 살아 있는 rs-lead 세션까지 대상이 됐다(라이브 확인).
+  #       문자열이 있으면 잡는데, 부트 프롬프트에 어댑터 명령이 적혀 있어 살아 있는
+  #       rs-lead 세션까지 대상이 됐다(라이브 확인).
   #   (b) 같은 $RS_LOCAL 을 볼 것. cwd 만 보면 같은 저장소의 **다른 배치**까지 죽인다 —
   #       테스트가 운영 어댑터를 SIGTERM 했다(실제로 그랬다).
   HERE="$(pwd -P)"
-  RS_CURSOR_ARG="--cursor $RS_LOCAL/events.cursor"
+  RS_WATCH_ARG="--watchlist $RS_LOCAL/watchlist.json"
   for pid in $(ps -axo pid=,args= 2>/dev/null | awk '($2 ~ /bin\/inbound_rrr\.py$/ || $3 ~ /bin\/inbound_rrr\.py$/) {print $1}'); do
     cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
-    case "$(ps -o args= -p "$pid" 2>/dev/null)" in *"$RS_CURSOR_ARG"*) same_local=1 ;; *) same_local=0 ;; esac
+    case "$(ps -o args= -p "$pid" 2>/dev/null)" in *"$RS_WATCH_ARG"*) same_local=1 ;; *) same_local=0 ;; esac
     if [ "$cwd" = "$HERE" ] && [ "$same_local" = "1" ]; then
       echo "cleanup: 이전 인바운드 어댑터 종료 pid=$pid"
       kill "$pid" 2>/dev/null || true
@@ -175,12 +174,11 @@ if [ "$ROLE" = "lead" ]; then
   # 넘기지 않으면 RS_LOCAL 을 옮겨도 커서와 배달 로그만 진짜 파일에 쓴다(테스트가 운영 로그를
   # 오염시킨다 — 실제로 그랬다).
   ADAPTER="bin/inbound_rrr.py"
-  EXTRA=""; [ -n "$SINCE" ] && EXTRA="--since $SINCE"
-  PATHS="--cursor $RS_LOCAL/events.cursor --delivery-log $RS_LOCAL/delivery.jsonl --inbox $RS_LOCAL/inbox.jsonl"
+  PATHS="--watchlist $RS_LOCAL/watchlist.json --delivery-log $RS_LOCAL/delivery.jsonl --inbox $RS_LOCAL/inbox.jsonl"
   if [ "$DELIVER" = "herdr" ]; then
-    nohup python3 "$ADAPTER" --deliver herdr --target "$RS_TARGET" $PATHS $EXTRA >> "$RS_LOCAL/inbound.log" 2>&1 &
+    nohup python3 "$ADAPTER" --deliver herdr --target "$RS_TARGET" $PATHS >> "$RS_LOCAL/inbound.log" 2>&1 &
   else
-    nohup python3 "$ADAPTER" --deliver "$DELIVER" $PATHS $EXTRA >> "$RS_LOCAL/inbound.log" 2>&1 &
+    nohup python3 "$ADAPTER" --deliver "$DELIVER" $PATHS >> "$RS_LOCAL/inbound.log" 2>&1 &
   fi
   RS_ADAPTER_PID=$!
   echo "$RS_ADAPTER_PID" > "$RS_LOCAL/inbound.pid"
@@ -214,9 +212,9 @@ if [ "$ROLE" = "lead" ]; then
   [ "$MODE" = "confirm" ] && MODE_NOTE="mode=confirm — 주문은 gw MCP 주문 도구로 집행하고, 집행 결과는 bin/order.py 로 원장에 기록한다"
   BOOT="세션 기동(role=lead, runtime=$RUNTIME). AGENTS.md 계약을 적용하라. $MODE_NOTE.
 기억: 규칙·상태·최근 일지는 시스템 프롬프트에 이미 실려 있다. 오늘 원본은 $RS_LOCAL/memory/{playbook,state,journal}/$TODAY.md 이며(기동 산출물 $RS_LOCAL/system-prompts/ 는 고치지 않는다 — 다음 기동에 덮어써진다), 고치려는 날짜 파일이 없으면 그 층의 최신을 그 이름으로 복사한 뒤 고친다. 상태의 '## 운영자 지시' 절은 운영자·에이전트의 것이다 — 읽고 따르되 지우거나 고치지 않는다.
-기동 순서(AGENTS.md §10): ① kiwoom_list_tools 로 브로커 도구 확인 ② 브로커 전제 확인(헬스 체크 + 시세 1건 실조회) ③ 계좌·원장 대사(python3 scripts/ledger.py validate; python3 scripts/ledger.py tail -n 20) ④ 상태 확인(시스템 프롬프트) ⑤ 활성 구독 복원(python3 bin/subscribe.py show; 비었거나 만료면 다시 선언, 재시작 뒤 밀린 이벤트는 python3 bin/inbound_rrr.py --once) ⑥ 운영자 보고($REPORT_TOOL --text …).
-도구: 집행 결과 기록·보고 = python3 bin/order.py --order-ref <dup_key> · 손절 협의 = python3 bin/consult.py propose|pre|agree|decline|status|list · 원장 = python3 scripts/ledger.py append <evt> --json '<obj>' (decision 은 action·event_label·rationale·근거 요약, hold·no_action 도 기록) · 산술 = python3 scripts/rt_calc.py · 결정 패킷 = python3 bin/decision_packet.py <sym> --bar-ts <bar_ts> [--with-momentum] (GET 전용) · 구독 = python3 bin/subscribe.py set|show|clear · 보고 = $REPORT_TOOL --text. 거래소는 SOR 고정(dmst_stex_tp=\"SOR\")이며 5요소 중 거래소를 매번 고르지 않는다. 장 종료 시 자동 소멸하므로 마감 전 취소 작업을 두지 않는다. 실제 주문은 gw MCP 주문 도구(kiwoom_order_*)로 내며 집행은 rs-exec 가 맡는다. 회계(marks·flags·review)는 운영자의 크론이 돌리며 이 세션은 읽기만 한다.
-이후 입력: 매 턴 앞에 '[턴 컨텍스트]' 한 묶음(mode·운영자 지시·태도·열린 협의 — 상태 파일에서 그때그때 읽는다), '[digest …]' 다이제스트(소스=$SOURCE), '[market-check ts=HH:MM]' 30분 시장 체크(시각뿐 — 시장은 직접 본다), 운영자 지시(채널=$OPCH; console 이면 이 pane 직접 입력, telegram 이면 텔레그램 채널), 스케줄, 회계 flag."
+기동 순서(AGENTS.md §10): ① kiwoom_list_tools 로 브로커 도구 확인 ② 브로커 전제 확인(헬스 체크 + 시세 1건 실조회) ③ 계좌·원장 대사(python3 scripts/ledger.py validate; python3 scripts/ledger.py tail -n 20) ④ 상태 확인(시스템 프롬프트) ⑤ 감시 목록 확인(python3 bin/watchlist.py show — **매번 오늘 봐야 할 종목과 대조하라**. 목록에 없는 종목의 이벤트는 오지 않는다. 고치면 어댑터가 다음 이벤트부터 바로 듣는다) ⑥ 운영자 보고($REPORT_TOOL --text …).
+도구: 집행 결과 기록·보고 = python3 bin/order.py --order-ref <dup_key> · 손절 협의 = python3 bin/consult.py propose|pre|agree|decline|status|list · 원장 = python3 scripts/ledger.py append <evt> --json '<obj>' (decision 은 action·event_label·rationale·근거 요약, hold·no_action 도 기록) · 산술 = python3 scripts/rt_calc.py · 결정 패킷 = python3 bin/decision_packet.py <sym> --bar-ts <bar_ts> [--with-momentum] (GET 전용) · 감시 목록 = python3 bin/watchlist.py set|add|drop|show|clear (add·drop 은 나머지를 보존한다) · 보고 = $REPORT_TOOL --text. 거래소는 SOR 고정(dmst_stex_tp=\"SOR\")이며 5요소 중 거래소를 매번 고르지 않는다. 장 종료 시 자동 소멸하므로 마감 전 취소 작업을 두지 않는다. 실제 주문은 gw MCP 주문 도구(kiwoom_order_*)로 내며 집행은 rs-exec 가 맡는다. 회계(marks·flags·review)는 운영자의 크론이 돌리며 이 세션은 읽기만 한다.
+이후 입력: 매 턴 앞에 '[턴 컨텍스트]' 한 묶음(mode·운영자 지시·태도·열린 협의 — 상태 파일에서 그때그때 읽는다), '[digest …]' 다이제스트(소스=$SOURCE), '[market-check ts=HH:MM]' 30분 시장 체크(시각뿐 — 시장은 직접 본다), '[watchlist-problem …]' 감시 목록 이상(그 동안 종목 이벤트가 전부 버려진다 — 즉시 bin/watchlist.py 로 고쳐라), 운영자 지시(채널=$OPCH; console 이면 이 pane 직접 입력, telegram 이면 텔레그램 채널), 스케줄, 회계 flag."
 else
   MODE_NOTE="mode=$MODE"
   [ "$MODE" = "dry_run" ] && MODE_NOTE="mode=dry_run — 결정과 원장 기록만 하고 주문은 내지 않는다(제출 0)"

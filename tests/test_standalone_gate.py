@@ -1,4 +1,4 @@
-"""단독 실행 게이트 (D16, §11)
+"""단독 실행 게이트 — 배포된 clone 은 형제 저장소 없이 선다
 
 1. 저장소 전체에 형제 저장소 경로(trading-sys/<다른repo>, ../rrr, rrr/docs/)가 없어야 한다.
 2. kiwoom_sdk 임포트가 없어야 한다 — 단, bin/broker_kiwoom.py 만 W2 이전 한시적 allowlist 예외.
@@ -98,6 +98,34 @@ class StandaloneGateTests(unittest.TestCase):
 
         self.assertEqual(violations, [], f"Sibling repo paths found:\n" + "\n".join(violations))
 
+    def test_no_design_decision_numbers(self):
+        """`D18` 같은 결정 번호는 이 저장소에서 풀 수 없다 — 쓰지 않는다.
+
+        번호의 정의는 형제 저장소의 설계 문서에 있고, 그 경로는 이 저장소가 적을 수도 없다
+        (위 테스트가 금지한다). 배포된 clone 에는 그 문서 자체가 없으므로, 읽는 사람은
+        `D18` 을 보고도 어디로 가야 할지 알 수 없다 — 있는데 도달할 수 없는 참조다.
+
+        뜻을 문장으로 적는다. 번호는 설계 문서를 읽는 사람에게만 값이 있고, 런북을 읽는
+        운영자에게는 풀어 쓴 문장이 바로 쓸모 있다.
+        """
+        pat = re.compile(r"\bD\d{1,2}\b")
+        violations = []
+        for path in _iter_repo_files(ROOT):
+            if not path.endswith((".md", ".py", ".sh")):
+                continue
+            rel = os.path.relpath(path, ROOT)
+            if os.path.samefile(path, __file__):
+                continue
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    for line_no, line in enumerate(f, 1):
+                        m = pat.search(line)
+                        if m:
+                            violations.append(f"{rel}:{line_no}: {m.group(0)} — {line.strip()[:80]}")
+            except OSError:
+                continue
+        self.assertEqual(violations, [], "풀 수 없는 결정 번호:\n" + "\n".join(violations))
+
     def test_no_kiwoom_sdk_imports_except_allowlist(self):
         """kiwoom_sdk 임포트는 allowlist 에 명시된 파일(bin/broker_kiwoom.py)에만 존재해야 한다."""
         import_pattern = re.compile(r"^\s*(?:import\s+kiwoom_sdk|from\s+kiwoom_sdk\s+import)")
@@ -154,7 +182,7 @@ class StandaloneGateTests(unittest.TestCase):
             self.assertIn(cmd, f.read(), f"docs/02-runbook.md does not document test command: {cmd}")
 
     def test_eod_cancel_removed_and_no_gateway_state_in_code(self):
-        """D22: 주문은 SOR 고정이며 장 종료 시 자동 소멸하므로 eod_cancel.py 및 gateway-state.json 잔재가 없어야 한다."""
+        """주문은 SOR 고정이며 장 종료 시 자동 소멸하므로 eod_cancel.py 및 gateway-state.json 잔재가 없어야 한다."""
         self.assertFalse(os.path.exists(os.path.join(ROOT, "bin", "eod_cancel.py")), "bin/eod_cancel.py must be removed")
         self.assertFalse(os.path.exists(os.path.join(ROOT, "tests", "test_eod_cancel.py")), "tests/test_eod_cancel.py must be removed")
 
@@ -208,7 +236,7 @@ class StandaloneGateTests(unittest.TestCase):
             self.assertNotIn(token, content, f"bin/start.sh: MCP 기계장치가 되살아났다 — '{token}'")
 
     def test_order_exchange_is_sor_everywhere(self):
-        """주문 거래소는 SOR 고정이다(D22) — 다른 거래소를 지시하는 문장이 남으면 안 된다.
+        """주문 거래소는 SOR 고정이다 — 다른 거래소를 지시하는 문장이 남으면 안 된다.
 
         docs/04-price_source.md 가 SOR 고정 이전 서술(`dmst_stex_tp=NXT`)을 들고 있었다.
         세션이 그 문서를 읽으면 잘못된 거래소로 주문을 낸다. `_AL` 이 조회 전용이라는 규칙은
@@ -254,22 +282,23 @@ class StandaloneGateTests(unittest.TestCase):
         self.assertIn("사람 채널이 없다", content)
 
 
-    def test_subscription_vocabulary_has_one_source(self):
-        """구독 어휘의 정본은 inbound_core 하나여야 한다.
+    def test_watchlist_vocabulary_has_one_source(self):
+        """감시 목록 판정의 정본은 inbound_core 하나여야 한다.
 
-        같은 목록을 두 곳에 적으면 갈리고, 갈려도 로그에는 unsubscribed·session_mismatch 만
-        남아 정상 필터링과 구분되지 않는다. 실제로 subscribe.py 에 폐기된 tick 이 남고
-        heartbeat 가 빠져 있어 `--events heartbeat` 선언이 거부됐다.
+        같은 규칙을 두 곳에 적으면 갈리고, 갈려도 로그에는 unwatched 만 남아 정상 필터링과
+        구분되지 않는다. 옛 구독에서 실제로 그랬다 — subscribe.py 에 폐기된 tick 이 남고
+        heartbeat 가 빠져 `--events heartbeat` 선언이 거부됐다.
+
+        CLI(watchlist.py)는 파일을 쓰기만 하고, 무엇을 배달할지는 코어만 정한다.
         """
         sys.path.insert(0, os.path.join(ROOT, "bin"))
         import inbound_core as core
-        import subscribe
+        import watchlist
 
-        self.assertIs(subscribe.EVENT_TYPES, core.SUBSCRIBABLE_EVENT_TYPES)
-        self.assertIs(subscribe.SESSIONS, core.SESSION_TOKENS)
-        self.assertIn("heartbeat", core.SUBSCRIBABLE_EVENT_TYPES)
-        self.assertIn("macro", core.SUBSCRIBABLE_EVENT_TYPES)
-        self.assertNotIn("tick", core.SUBSCRIBABLE_EVENT_TYPES)  # D12 로 폐기
+        self.assertTrue(hasattr(core, "watchlist_matches"), "판정은 코어에 있다")
+        self.assertFalse(hasattr(watchlist, "watchlist_matches"), "CLI 가 판정을 따로 들고 있다")
+        for gone in ("SESSION_TOKENS", "SUBSCRIBABLE_EVENT_TYPES"):
+            self.assertFalse(hasattr(core, gone), f"폐기된 어휘 {gone} 가 남았다")
 
     def test_no_module_redeclares_the_zone_event_list(self):
         """존 이벤트 목록을 다시 적는 모듈이 있으면 안 된다 — 정본은 inbound_core 뿐이다.
@@ -392,9 +421,9 @@ class StandaloneGateTests(unittest.TestCase):
 
         - max_attempts_per_digest (config 키 삭제됨)
         - safety_check (order.py 주문 제출/대사 안전 외피 폐기)
-        - kill 파일 / kill_file (외피 폐기, 급정지는 gw 키 비활성화 = D18)
+        - kill 파일 / kill_file (외피 폐기, 급정지는 gw 키 비활성화)
         - ops_retry_limit (rules.py 삭제됨)
-        - direct 모드 (D19 로 폐기, dry_run·confirm 둘뿐)
+        - direct 모드 (폐기 — 운전 모드는 dry_run·confirm 둘뿐)
         - RS_ROLE=session (--role lead|exec 로 변경됨)
         """
         doc_files = _repo_text_files(("docs",), (".md",)) + [
@@ -459,7 +488,7 @@ class StandaloneGateTests(unittest.TestCase):
         table = self._section(self._local_doc(), "## 무엇이 어디에")
         self.assertTrue(table.strip(), "'## 무엇이 어디에' 절이 비었다")
         for name in ("ledger.jsonl", "positions.jsonl", "frozen_book.json",
-                     "subscriptions.json", "events.cursor", "delivery.jsonl",
+                     "watchlist.json", "delivery.jsonl",
                      "inbound.log", "inbound.pid"):
             self.assertIn(name, table, f"{name} 이 '무엇이 어디에' 표에 없다")
 
@@ -468,7 +497,7 @@ class StandaloneGateTests(unittest.TestCase):
         section = self._section(self._local_doc(), "## 지울 때")
         self.assertTrue(section.strip(), "'## 지울 때' 절이 비었다")
         for name in ("ledger.jsonl", "packets/", "consults/", "stories/",
-                     "events.cursor", "subscriptions.json"):
+                     "watchlist.json"):
             self.assertIn(name, section, f"{name} 을 지웠을 때의 결과가 '지울 때' 절에 없다")
 
     def test_local_doc_does_not_restate_the_memory_edit_rule(self):

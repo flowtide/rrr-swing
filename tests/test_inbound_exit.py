@@ -118,12 +118,19 @@ class DeliveryFailureExitTest(unittest.TestCase):
             "sym": "005930", "bar_ts": "2026-09-14T10:00:00", "evt": "support_return",
             "lvl": "s1", "lvl_px": "70000", "px": "70500",
         }
-        page = json.dumps({"schema": "events.1.0", "entries": [entry],
-                           "next_since": "1-0", "count": 1, "truncated": False}).encode()
+        # 어댑터는 SSE 하나만 쓴다(--once 로 페이지를 긁는 catch-up 은 커서와 함께 폐기됐다).
+        sse = (f"id: 1-0\nevent: zone\ndata: {json.dumps(entry, ensure_ascii=False)}\n\n").encode()
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self):
-                body = page if self.path.startswith("/api/events") else b'{"ok":true}'
+                if self.path.startswith("/api/events/stream"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Content-Length", str(len(sse)))
+                    self.end_headers()
+                    self.wfile.write(sse)
+                    return
+                body = b'{"ok":true}'
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -142,10 +149,9 @@ class DeliveryFailureExitTest(unittest.TestCase):
         self.cfgp = os.path.join(self.d, "config.json")
         with open(self.cfgp, "w", encoding="utf-8") as f:
             json.dump({"account_id": "acct", "gw": {"base_url": self.base, "api_key": "k"}}, f)
-        self.subp = os.path.join(self.d, "subs.json")
-        with open(self.subp, "w", encoding="utf-8") as f:
-            json.dump({"symbols": ["005930"], "event_types": list(core.SUBSCRIBABLE_EVENT_TYPES),
-                       "sessions": list(core.SESSION_TOKENS), "expires_at": "2099-01-01T20:00:00"}, f)
+        self.watchp = os.path.join(self.d, "watchlist.json")
+        with open(self.watchp, "w", encoding="utf-8") as f:
+            json.dump({"005930": {}}, f)
         # PATH 앞에 실패하는 herdr 를 둔다.
         self.stubs = os.path.join(self.d, "stubs")
         os.makedirs(self.stubs)
@@ -161,9 +167,9 @@ class DeliveryFailureExitTest(unittest.TestCase):
         env.pop("RS_GW_BASE_URL", None)
         return subprocess.run(
             [sys.executable, os.path.join(ROOT, "bin", "inbound_rrr.py"),
-             "--config", self.cfgp, "--subscriptions", self.subp,
-             "--cursor", os.path.join(self.d, "cur"), "--delivery-log", os.path.join(self.d, "dl.jsonl"),
-             "--deliver", "herdr", "--target", "rs-lead", "--once", "--since", "0"],
+             "--config", self.cfgp, "--watchlist", self.watchp,
+             "--delivery-log", os.path.join(self.d, "dl.jsonl"),
+             "--deliver", "herdr", "--target", "rs-lead", "--max-reconnects", "0"],
             capture_output=True, text=True, env=env, cwd=ROOT, timeout=60)
 
     def test_delivery_failure_exits_undelivered_with_reason_on_last_line(self):
@@ -361,11 +367,12 @@ class DeliveryLogKeepsContentTest(unittest.TestCase):
 
     def _proc(self, tmp):
         cfg = {"account_id": "acct", "inbound": {}}
-        sub = {"symbols": ["005930"], "event_types": list(core.SUBSCRIBABLE_EVENT_TYPES),
-               "sessions": list(core.SESSION_TOKENS), "expires_at": "2099-01-01T20:00:00"}
+        watchp = os.path.join(tmp, "watchlist.json")
+        with open(watchp, "w", encoding="utf-8") as f:
+            json.dump({"005930": {}}, f)
         log = core.DeliveryLog(os.path.join(tmp, "delivery.jsonl"))
         out = []
-        return core.Processor(cfg, sub, log, deliver=out.append), out, os.path.join(tmp, "delivery.jsonl")
+        return core.Processor(cfg, core.WatchList(watchp), log, deliver=out.append), out, os.path.join(tmp, "delivery.jsonl")
 
     def _rows(self, path, kind):
         with open(path, encoding="utf-8") as f:
@@ -406,7 +413,7 @@ class LocalPathsAreAuthoritativeTest(unittest.TestCase):
             self.assertIn("$PATHS", line, f"경로를 넘기지 않는 기동 줄: {line.strip()}")
         defn = [l for l in launch.splitlines() if l.strip().startswith("PATHS=")]
         self.assertEqual(len(defn), 1, defn)
-        for flag, path in (("--cursor", "$RS_LOCAL/events.cursor"),
+        for flag, path in (("--watchlist", "$RS_LOCAL/watchlist.json"),
                            ("--delivery-log", "$RS_LOCAL/delivery.jsonl"),
                            ("--inbox", "$RS_LOCAL/inbox.jsonl")):
             self.assertIn(f"{flag} {path}", defn[0], f"{flag} 가 RS_LOCAL 을 따르지 않는다")
@@ -420,18 +427,17 @@ class LocalPathsAreAuthoritativeTest(unittest.TestCase):
         cfgp = os.path.join(d, "config.json")
         with open(cfgp, "w", encoding="utf-8") as f:
             json.dump({"account_id": "acct", "gw": {"base_url": "http://127.0.0.1:1", "api_key": "k"}}, f)
-        subp = os.path.join(d, "subs.json")
-        with open(subp, "w", encoding="utf-8") as f:
-            json.dump({"symbols": ["005930"], "event_types": ["macro"], "sessions": ["REG_KRX_NXT"],
-                       "expires_at": "2099-01-01T20:00:00"}, f)
+        watchp = os.path.join(d, "watchlist.json")
+        with open(watchp, "w", encoding="utf-8") as f:
+            json.dump({"005930": {}}, f)
         os.makedirs(loc, exist_ok=True)
         env = dict(os.environ)
         env.pop("RS_GW_BASE_URL", None)
         subprocess.run(
             [sys.executable, os.path.join(ROOT, "bin", "inbound_rrr.py"), "--config", cfgp,
-             "--subscriptions", subp, "--cursor", os.path.join(loc, "events.cursor"),
+             "--watchlist", watchp,
              "--delivery-log", os.path.join(loc, "delivery.jsonl"),
-             "--deliver", "stdout", "--once", "--since", "0"],
+             "--deliver", "stdout", "--max-reconnects", "0"],
             capture_output=True, text=True, env=env, cwd=ROOT, timeout=60)
         after = os.path.getsize(repo_log) if os.path.exists(repo_log) else None
         self.assertEqual(before, after, "저장소의 local/delivery.jsonl 이 변했다")
@@ -478,15 +484,15 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
             path = os.path.join(self.d, "runtime_like.py")
             # 프롬프트 본문에 경로와 커서 인자가 **둘 다** 들어간 최악의 경우 — RS_LOCAL 범위
             # 제한만으로는 걸러지지 않으므로, 위치 판별(argv[0]|argv[1])만이 이것을 살린다.
-            prompt = ("밀린 이벤트는 python3 bin/inbound_rrr.py --once 로 따라잡는다. "
-                      f"커서는 --cursor {os.path.join(self.d, 'local')}/events.cursor 이다.")
+            prompt = ("감시 목록은 python3 bin/watchlist.py show 로 본다. "
+                      f"어댑터는 --watchlist {os.path.join(self.d, 'local')}/watchlist.json 을 읽는다.")
             argv = [sys.executable, path, "--prompt", prompt]
         else:
             d = os.path.join(self.d, "bin")
             os.makedirs(d, exist_ok=True)
             path = os.path.join(d, "inbound_rrr.py")
             # 정리는 같은 $RS_LOCAL 을 보는 어댑터만 죽인다 — 그 표식을 붙인다.
-            argv = [sys.executable, path, "--cursor", f"{os.path.join(self.d, 'local')}/events.cursor"]
+            argv = [sys.executable, path, "--watchlist", f"{os.path.join(self.d, 'local')}/watchlist.json"]
         with open(path, "w", encoding="utf-8") as f:
             f.write(body)
         proc = subprocess.Popen(argv, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -497,7 +503,7 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
         """런타임 세션을 죽이면 안 된다.
 
         `pgrep -f` 는 명령줄 어디에든 문자열이 있으면 잡는다. 부트 프롬프트에
-        `python3 bin/inbound_rrr.py --once` 가 적혀 있어 살아 있는 rs-lead claude 가
+        어댑터 명령이 적혀 있어 살아 있는 rs-lead claude 가
         정리 대상이 됐다 — 재기동이 다른 pane 의 세션을 죽인다(라이브에서 확인).
         """
         decoy = self._fake_adapter(immortal=False, decoy=True)
@@ -527,7 +533,7 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
         path = os.path.join(self.d, "bin", "inbound_rrr.py")
         with open(path, "w", encoding="utf-8") as f:
             f.write("import time\nwhile True: time.sleep(0.2)\n")
-        proc = subprocess.Popen([sys.executable, path, "--cursor", f"{other}/events.cursor"],
+        proc = subprocess.Popen([sys.executable, path, "--watchlist", f"{other}/watchlist.json"],
                                 cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(lambda: (proc.kill(), proc.wait()))
         env = dict(os.environ, RS_CONFIG=self.cfgp, FORCE_OUTSIDE_HERDR="1",
