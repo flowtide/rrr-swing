@@ -2,8 +2,11 @@
 """rrr-swing 결정 패킷 조립 — GET 전용. 판단·점수·추천 0.
 
 세션(LLM)이 이벤트 wake 에서 증거를 읽기(docs/03-evidence_guide.md, AGENTS.md §3) 위해 pull 하는 증거 묶음:
-`/api/health`(1회) + `/api/stocks/{sym}/context`(lean) + `/api/stocks/{sym}/flow` 필수, `--with-momentum` 이면 `/api/stocks/{sym}/momentum` 추가.
-응답은 **원문 그대로** 저장하고, 계약 사실(schema_version 일치·symbol 일치·신선도 필드 age_sec/partial/freshness)만 요약한다.
+`/api/health`(1회) + `/api/stocks/{sym}/context`(lean) + `/api/stocks/{sym}/flow` 필수, 항상 `/api/stocks/{sym}/market-context`
+(호가·OFI 등 5분봉, bars=2 로 [직전 확정봉, 현재 partial]) 도 조회하나 필수는 아니다(실패해도 rc 영향 없음), `--with-momentum` 이면 `/api/stocks/{sym}/momentum` 추가.
+응답은 **원문 그대로** 저장하고, 계약 사실(schema_version 일치·symbol 일치·신선도 필드 age_sec/partial/freshness·호가 확정봉 confidence)만 요약한다.
+market-context 는 REQUIRED_SOURCES 가 아니다 — 실패해도 패킷은 성공(rc=0), 확정봉 confidence 가 ok 아니면 경고만 남긴다
+(docs/07-orderbook_evidence_study.md §6, "판단 없이 사실만" — CK-8 채택 등 규칙 반영은 정규장 검증 후).
 출력: local/packets/<ts>-<sym>.json (packet_id·sym·bar_ts·fetched_at·summary). X-API-Key = config gw.api_key.
 exit: 0 필수 소스 성공 / 1 필수 소스 실패(패킷은 남긴다 — 증거) / 2 인자·설정 오류. 재사용 출처: rrr-trading2 bin/decision_packet.py
 """
@@ -115,6 +118,14 @@ def source_quality(name: str, payload, success: bool, symbol: str) -> dict:
             warnings.append(f"{name}:{path}=missing")
     if name == "context" and success:
         warnings.append("context:quote_freshness_not_exposed")  # created_at 은 조립 시각 — quote 신선도가 아니다
+    if name == "market_context" and success:
+        # 직전 확정봉(bars=2 요청 시 bars[-2], 1개뿐이면 bars[-1])의 confidence 만 사실로 남긴다.
+        # ok 아니면 그 봉의 호가·체결·프로그램 축은 신뢰 낮음(phenomena 는 low_confidence 하나) — 판단 없이 경고만.
+        bars = payload.get("bars") if isinstance(payload, dict) else None
+        confirmed = (bars[-2] if len(bars) >= 2 else bars[-1]) if isinstance(bars, list) and bars else None
+        confirmed_confidence = confirmed.get("confidence") if isinstance(confirmed, dict) else None
+        if confirmed_confidence != "ok":
+            warnings.append(f"market_context:orderbook_confidence={confirmed_confidence}")
     return {"schema": {"expected": expected, "actual": actual, "match": schema_match},
             "symbol": {"expected": expected_sym, "actual": actual_sym, "match": symbol_match},
             "freshness_facts": [{"path": p, "value": v} for p, v in facts],
@@ -124,7 +135,8 @@ def source_quality(name: str, payload, success: bool, symbol: str) -> dict:
 def build_packet(symbol: str, *, base_url: str, token: str, bar_ts: str | None, now: str | None = None,
                  with_momentum: bool = False, fetch=fetch_json) -> dict:
     fetched_at = now or datetime.now().isoformat(timespec="seconds")
-    plan = [("health", "/api/health"), ("context", f"/api/stocks/{symbol}/context"), ("flow", f"/api/stocks/{symbol}/flow")]
+    plan = [("health", "/api/health"), ("context", f"/api/stocks/{symbol}/context"), ("flow", f"/api/stocks/{symbol}/flow"),
+            ("market_context", f"/api/stocks/{symbol}/market-context?bars=2&market=none")]
     if with_momentum:
         plan.append(("momentum", f"/api/stocks/{symbol}/momentum"))
     sources: dict[str, dict] = {}

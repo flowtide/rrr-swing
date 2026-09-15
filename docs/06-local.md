@@ -47,7 +47,7 @@ local/
 | `lessons/` · `meetings/<날짜>.md` | 교훈 · 주간 미팅 기록(전략 변경 합의) | 세션 · 운영자 |
 | `ledger.jsonl` | **원장** — 계좌별 append-only JSONL. 결정·집행·협의·회계가 전부 여기 | `scripts/ledger.py append` 만 |
 | `positions.jsonl` · `frozen_book.json` | 전 포지션 마크 · 기준선 동결북 | `scripts/marks.py`(운영자 크론) |
-| `packets/<ts>-<sym>.json` | 결정 시점 `/context`·`/flow` **원문** | `bin/decision_packet.py` |
+| `packets/<ts>-<sym>.json` | 결정 시점 `/context`·`/flow`·`/market-context`(호가, 보조 증거) **원문** | `bin/decision_packet.py` |
 | `consults/<id>.json` | 손절·청산 협의 | `bin/consult.py` |
 | `reports/<날짜>.md` | 운영자 보고(console 채널) | `bin/report.py` · `bin/order.py` |
 | `system-prompts/<날짜>.md` | 기동 컨텍스트 산출물 | `bin/context_load.py`(매 기동 덮어쓴다) |

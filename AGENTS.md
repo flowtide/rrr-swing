@@ -46,7 +46,7 @@
 | 층 | 무엇 | 어떻게 |
 |---|---|---|
 | 신호 | 활성 유니버스 종목의 지지/저항 이벤트 6종 — `support_enter` `support_return` `support_break` `resistance_enter` `resistance_return` `resistance_break` — 과 `heartbeat` | gw 스트림(SSE), 봉당 1건, 다이제스트로 도착. `heartbeat` 는 존 이벤트 없이 12봉이 지났을 때 오는 같은 형식의 현재가 통지다(존 전이 아님) |
-| 시세·수급 | 진행 중 봉, 큰손(체결 크기 그룹)·외국인·기관·프로그램 | gw `/api/stocks/{sym}/context`·`/api/stocks/{sym}/flow` 조회 — `bin/decision_packet.py`(GET 전용, 원문을 `local/packets/` 에 보존) |
+| 시세·수급 | 진행 중 봉, 큰손(체결 크기 그룹)·외국인·기관·프로그램, 호가(매수·매도벽 흐름·1호가 압력·소진, 보조 증거) | gw `/api/stocks/{sym}/context`·`/api/stocks/{sym}/flow`·`/api/stocks/{sym}/market-context` 조회 — `bin/decision_packet.py`(GET 전용, 원문을 `local/packets/` 에 보존) |
 | 시장·매크로 | 지수·업종·해외 시황 | gw SSE macro, 30분 체크 |
 | 서사 | 공시 → 테마·업종 → 뉴스 헤드라인 | 정형 피드, 필요할 때 웹 검색 |
 | 계좌 | 잔고·체결·예수금·미체결 | 브로커 조회 도구(진입점 파일) |
