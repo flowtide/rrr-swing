@@ -152,14 +152,25 @@ if [ "$ROLE" = "lead" ]; then
   #
   # 범위는 **내 uid** 다. 같은 머신의 다른 사용자 프로세스는 내 것이 아니다.
   #
-  # 스크립트는 실행 파일 자리(argv[0]|argv[1])에 있어야 한다. `pgrep -f` 는 명령줄 어디에든
-  # 문자열이 있으면 잡는데, 부트 프롬프트에 어댑터 명령이 적혀 있어 살아 있는 rs-lead
-  # 세션까지 대상이 됐다(라이브 확인). 그래서 위치로 판별한다.
+  # 스크립트는 **인터프리터 뒤 첫 비(非)플래그 인자**다. 그 자리만 본다.
+  #   - `pgrep -f` 처럼 명령줄 어디든 훑으면, 부트 프롬프트에 어댑터 명령이 적혀 있어
+  #     살아 있는 rs-lead 세션까지 대상이 된다(라이브 확인).
+  #   - argv[0]|argv[1] 로 못박으면 인터프리터 플래그(`-u`·`-X`·`-O`) 하나에 한 칸씩 밀려
+  #     대상에서 빠진다. 로그 flush 때문에 `-u` 로 띄운 어댑터가 그렇게 빠졌다(라이브 확인).
   #
   # 대가: 테스트 스위트가 실제 어댑터를 띄우므로, 운영 어댑터가 살아 있는 동안 스위트를
   # 돌리면 그것도 함께 정리된다. 운영 중에는 돌리지 않는다(docs/02-runbook.md).
   MY_UID="$(id -u)"
-  for pid in $(ps -axo pid=,uid=,args= 2>/dev/null | awk -v u="$MY_UID" '$2 == u && ($3 ~ /bin\/inbound_rrr\.py$/ || $4 ~ /bin\/inbound_rrr\.py$/) {print $1}'); do
+  for pid in $(ps -axo pid=,uid=,args= 2>/dev/null | awk -v u="$MY_UID" '
+      $2 != u { next }
+      $3 ~ /bin\/inbound_rrr\.py$/ { print $1; next }        # 셰방으로 직접 실행
+      {
+        for (i = 4; i <= NF; i++) {
+          if ($i ~ /^-/) continue                            # 인터프리터 플래그는 건너뛴다
+          if ($i ~ /bin\/inbound_rrr\.py$/) print $1
+          next                                               # 첫 비플래그가 스크립트 자리다
+        }
+      }'); do
     echo "cleanup: 이전 인바운드 어댑터 종료 pid=$pid"
     kill "$pid" 2>/dev/null || true
     # 죽을 때까지 기다린다. 겹치면 같은 다이제스트가 두 번 들어간다.

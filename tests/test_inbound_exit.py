@@ -523,6 +523,40 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
             except (OSError, ValueError):
                 pass
 
+    def test_cleanup_finds_the_adapter_behind_interpreter_flags(self):
+        """`python3 -u bin/inbound_rrr.py` 도 찾아야 한다.
+
+        스크립트를 argv[0]|argv[1] 위치로만 찾으면 인터프리터 플래그(`-u`·`-X`·`-O`) 하나에
+        한 칸씩 밀려 대상에서 빠진다. 로그를 즉시 flush 하려고 `-u` 로 띄운 어댑터가 정리되지
+        않아, 다음 기동이 둘째 어댑터를 올렸다(라이브에서 났다).
+
+        스크립트는 **인터프리터 뒤 첫 비(非)플래그 인자**다. 그 자리를 본다.
+        """
+        os.makedirs(os.path.join(self.d, "bin"), exist_ok=True)
+        path = os.path.join(self.d, "bin", "inbound_rrr.py")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("import time\nwhile True: time.sleep(0.2)\n")
+        proc = subprocess.Popen([sys.executable, "-u", path, "--watchlist", "x/watchlist.json"],
+                                cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (proc.kill(), proc.wait()))
+        env = dict(os.environ, RS_CONFIG=self.cfgp, FORCE_OUTSIDE_HERDR="1",
+                   RS_GW_BASE_URL=self.health_url, RS_LOCAL=os.path.join(self.d, "local"),
+                   RS_ADAPTER_GRACE_SEC="0", RS_CLEANUP_TRIES="3")
+        r = subprocess.run(["bash", START, "--role", "lead", "--adapter-only"], capture_output=True,
+                           text=True, env=env, cwd=ROOT, timeout=60)
+        self.assertIn(f"pid={proc.pid}", r.stdout + r.stderr, "`-u` 로 뜬 어댑터를 지나쳤다")
+        for _ in range(50):
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        self.assertIsNotNone(proc.poll(), "`-u` 로 뜬 어댑터가 살아남았다")
+        pidf = os.path.join(self.d, "local", "inbound.pid")
+        if os.path.exists(pidf):
+            try:
+                os.kill(int(open(pidf).read().strip()), 9)
+            except (OSError, ValueError):
+                pass
+
     def test_cleanup_takes_every_adapter_of_my_uid(self):
         """내 uid 의 어댑터는 $RS_LOCAL 이 달라도 정리한다 — 하나만 살아야 하기 때문이다.
 
@@ -563,7 +597,8 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
         with open(START, encoding="utf-8") as f:
             cleanup = f.read().split("--- ④ 인바운드 어댑터")[1].split("mkdir -p")[0]
         self.assertIn("id -u", cleanup, "내 uid 를 구하지 않는다")
-        self.assertRegex(cleanup, r"\$2 ?== ?u", "ps 결과를 uid 로 거르지 않는다")
+        self.assertIn('-v u="$MY_UID"', cleanup, "내 uid 를 awk 에 넘기지 않는다")
+        self.assertRegex(cleanup, r"\$2 ?[!=]= ?u", "ps 결과를 uid 로 거르지 않는다")
 
     def test_start_sh_refuses_when_previous_adapter_will_not_die(self):
         """SIGTERM 을 무시하는 어댑터가 남아 있으면 기동하지 않는다.
