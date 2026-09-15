@@ -144,27 +144,30 @@ python3 bin/inbound_core.py --config "$RS_CONFIG" --check-gw-health || exit 1
 
 if [ "$ROLE" = "lead" ]; then
   # --- ④ 인바운드 어댑터 ---------------------------------------------------------
-  # 고아 어댑터만 표적 정리. 대상은 **내가 관리하는 어댑터**뿐이라 두 가지로 좁힌다.
-  #   (a) 스크립트가 실행 파일 자리(argv[0]|argv[1])에 있을 것. `pgrep -f` 는 명령줄 어디에든
-  #       문자열이 있으면 잡는데, 부트 프롬프트에 어댑터 명령이 적혀 있어 살아 있는
-  #       rs-lead 세션까지 대상이 됐다(라이브 확인).
-  #   (b) 같은 $RS_LOCAL 을 볼 것. cwd 만 보면 같은 저장소의 **다른 배치**까지 죽인다 —
-  #       테스트가 운영 어댑터를 SIGTERM 했다(실제로 그랬다).
-  HERE="$(pwd -P)"
-  RS_WATCH_ARG="--watchlist $RS_LOCAL/watchlist.json"
-  for pid in $(ps -axo pid=,args= 2>/dev/null | awk '($2 ~ /bin\/inbound_rrr\.py$/ || $3 ~ /bin\/inbound_rrr\.py$/) {print $1}'); do
-    cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
-    case "$(ps -o args= -p "$pid" 2>/dev/null)" in *"$RS_WATCH_ARG"*) same_local=1 ;; *) same_local=0 ;; esac
-    if [ "$cwd" = "$HERE" ] && [ "$same_local" = "1" ]; then
-      echo "cleanup: 이전 인바운드 어댑터 종료 pid=$pid"
-      kill "$pid" 2>/dev/null || true
-      # 죽을 때까지 기다린다. 겹치면 같은 다이제스트가 두 번 들어간다.
-      for _ in $(seq 1 "${RS_CLEANUP_TRIES:-50}"); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-      if kill -0 "$pid" 2>/dev/null; then
-        echo "ERROR: 이전 인바운드 어댑터(pid=$pid)가 종료되지 않았다 — 중복 배달을 막기 위해 기동을 중단한다."
-        echo "       확인: ps -p $pid ; 필요하면 kill -9 $pid 뒤 다시 실행하시오."
-        exit 1
-      fi
+  # 어댑터는 **하나만** 산다. 겹치면 같은 다이제스트가 두 번 배달된다.
+  #
+  # 식별은 **스크립트 이름 하나**로 한다. 인자로 좁히면 플래그 이름을 바꾸는 순간 조용히
+  # 깨진다 — 옛 이름으로 뜬 어댑터가 정리되지 않고 남아, 두 어댑터가 같은 세션에 동시에
+  # 배달했다(라이브에서 났다).
+  #
+  # 범위는 **내 uid** 다. 같은 머신의 다른 사용자 프로세스는 내 것이 아니다.
+  #
+  # 스크립트는 실행 파일 자리(argv[0]|argv[1])에 있어야 한다. `pgrep -f` 는 명령줄 어디에든
+  # 문자열이 있으면 잡는데, 부트 프롬프트에 어댑터 명령이 적혀 있어 살아 있는 rs-lead
+  # 세션까지 대상이 됐다(라이브 확인). 그래서 위치로 판별한다.
+  #
+  # 대가: 테스트 스위트가 실제 어댑터를 띄우므로, 운영 어댑터가 살아 있는 동안 스위트를
+  # 돌리면 그것도 함께 정리된다. 운영 중에는 돌리지 않는다(docs/02-runbook.md).
+  MY_UID="$(id -u)"
+  for pid in $(ps -axo pid=,uid=,args= 2>/dev/null | awk -v u="$MY_UID" '$2 == u && ($3 ~ /bin\/inbound_rrr\.py$/ || $4 ~ /bin\/inbound_rrr\.py$/) {print $1}'); do
+    echo "cleanup: 이전 인바운드 어댑터 종료 pid=$pid"
+    kill "$pid" 2>/dev/null || true
+    # 죽을 때까지 기다린다. 겹치면 같은 다이제스트가 두 번 들어간다.
+    for _ in $(seq 1 "${RS_CLEANUP_TRIES:-50}"); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "ERROR: 이전 인바운드 어댑터(pid=$pid)가 종료되지 않았다 — 중복 배달을 막기 위해 기동을 중단한다."
+      echo "       확인: ps -p $pid ; 필요하면 kill -9 $pid 뒤 다시 실행하시오."
+      exit 1
     fi
   done
   mkdir -p "$RS_LOCAL"

@@ -53,7 +53,7 @@ python3 bin/inbound_rrr.py --probe 0               # 연결 테스트 — 스트
 
 | 명령 | 용도 |
 |---|---|
-| `bin/start.sh [--role lead|exec] [--runtime claude|agy] [--adapter-only]` | config 검증(비밀 미출력, `gw.base_url`·`gw.api_key` 존재만 확인) → selftest → `/api/health` 1회 → 이전 인바운드 어댑터 정리(lsof cwd) → 인바운드 어댑터 백그라운드(`local/inbound.pid`, lead 만) → 런타임 기동. `operator_channel=telegram` 이면 텔레그램 플러그인 채널 주입 |
+| `bin/start.sh [--role lead|exec] [--runtime claude|agy] [--adapter-only]` | config 검증(비밀 미출력, `gw.base_url`·`gw.api_key` 존재만 확인) → selftest → `/api/health` 1회 → 내 uid 의 이전 인바운드 어댑터 전부 정리 → 인바운드 어댑터 백그라운드(`local/inbound.pid`, lead 만) → 런타임 기동. `operator_channel=telegram` 이면 텔레그램 플러그인 채널 주입 |
 | `python3 bin/inbound_rrr.py --deliver stdout|file|herdr [--target …] [--watchlist …] [--redeliver]` | **인바운드 어댑터**: 쿼리 없는 SSE 로 전량 수신 → `EventEntry`→태그 정규화 → **이벤트마다** `local/watchlist.json` 대조 → 계좌당 봉당 다이제스트 → 배달. 장중 창 안 30분마다 `[market-check ts=HH:MM]` wake(시각뿐). 커서 없음 — 언제나 현시점부터(지나간 봉은 실시간 판단에 쓸모가 없다). 재접속은 로그에 `gap=not_replayed`, 재접속 backoff 1→60s, 하트비트 타임아웃, 401 종료·503 backoff |
 | `python3 bin/inbound_rrr.py --probe <0\|stream id>` | **연결 테스트**: 그 지점부터 스트림을 열어 받은 것을 보여 주고 끝난다. 배달 0 — 감시 목록도 배달 로그도 열지 않는다. `since` 를 받는 유일한 자리다(운전용 `build_stream_url` 에는 그 인자가 없다). 받은 게 0건이면 종료 코드도 0이 아니다 |
 | `python3 bin/watchlist.py set|add|drop|show|clear [--note …] [--append-ledger]` | 감시 목록(세션이 실행). `add`·`drop` 은 나머지 종목과 메모를 보존한다 |

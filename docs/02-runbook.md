@@ -57,7 +57,7 @@
                         └ sym 없음 → 배달 (macro = 시장 전체)
    ```
    ①이 매 이벤트마다 돈다 — 목록을 고치면 다음 이벤트부터 반영되고 재기동이 필요 없다.
-6. **기동**(`bin/start.sh --role lead`, Herdr 환경): config 검증(gw 는 `gw.base_url`·`gw.api_key` 존재만, 값 미출력, `mode`) → selftest(`inbound_rrr.py --selftest`, `watchlist.py show`, `ledger.py selftest`, `rt_calc.py selftest`, `marks.py --selftest`, `flags.py --selftest`, `review.py --selftest`) → gw `/api/health` 1회 → 같은 저장소의 이전 인바운드 어댑터 종료(lsof cwd) → 인바운드 어댑터를 `--deliver herdr --target rs-lead` 로 백그라운드 기동(`local/inbound.pid`, 로그 `local/inbound.log`) → 기억 머지(`bin/context_load.py` → `local/system-prompts/<오늘>.md`) → 런타임 기동(부트 프롬프트 = AGENTS.md 적용 + `mode` + 기동 순서(AGENTS.md §10) + 도구 목록 + 오늘 원본 경로. 기억은 `--append-system-prompt-file` 로 들어간다). 기본 소스 rrr_stream(gw SSE)은 봇 토큰이 필요 없다. 최초 1회는 `bin/init_local.sh` 로 `local/` 골격과 첫 원본(`docs/templates/`)을 만든다(멱등). `local/` 에 무엇이 있고 무엇을 고쳐도 되는지는 `docs/06-local.md`.
+6. **기동**(`bin/start.sh --role lead`, Herdr 환경): config 검증(gw 는 `gw.base_url`·`gw.api_key` 존재만, 값 미출력, `mode`) → selftest(`inbound_rrr.py --selftest`, `watchlist.py show`, `ledger.py selftest`, `rt_calc.py selftest`, `marks.py --selftest`, `flags.py --selftest`, `review.py --selftest`) → gw `/api/health` 1회 → **내 uid 의 이전 인바운드 어댑터 전부 종료**(어댑터는 하나만 산다) → 인바운드 어댑터를 `--deliver herdr --target rs-lead` 로 백그라운드 기동(`local/inbound.pid`, 로그 `local/inbound.log`) → 기억 머지(`bin/context_load.py` → `local/system-prompts/<오늘>.md`) → 런타임 기동(부트 프롬프트 = AGENTS.md 적용 + `mode` + 기동 순서(AGENTS.md §10) + 도구 목록 + 오늘 원본 경로. 기억은 `--append-system-prompt-file` 로 들어간다). 기본 소스 rrr_stream(gw SSE)은 봇 토큰이 필요 없다. 최초 1회는 `bin/init_local.sh` 로 `local/` 골격과 첫 원본(`docs/templates/`)을 만든다(멱등). `local/` 에 무엇이 있고 무엇을 고쳐도 되는지는 `docs/06-local.md`.
    ```bash
    bin/init_local.sh                        # 최초 1회(멱등): 원본 local/memory/{playbook,state,journal} + 산출물 local/system-prompts/ + local/{stories,meetings,lessons,consults,packets,reports} + 첫 원본
    bin/start.sh --role lead --check-only    # config·자격증명 점검(기동 0)
@@ -72,7 +72,8 @@
    기동 직후 `kiwoom_list_tools` 로 도구 목록을 확인한다. 주문은 gw MCP 주문 도구로 내고, `bin/order.py` 는 집행 결과 기록 및 사후 보고를 담당한다.
 7. 세션 기동 직후: 브로커 전제 확인 → 계좌·원장 대사(`python3 scripts/ledger.py validate`, `python3 scripts/ledger.py tail -n 20`, `python3 scripts/marks.py --report`) → 상태 확인(시스템 프롬프트) → **감시 목록을 오늘의 활성 유니버스와 대조**(`bin/watchlist.py show`; 어긋나면 §1-5 로 고친다 — 어제 목록을 물려받고도 조용한 장으로 읽는 일이 실제로 있었다) → 운영자 보고(console: `python3 bin/report.py --text "…"`, telegram: `bin/tg_send.py`).
 8. 전달: **인바운드 어댑터**(`bin/inbound_rrr.py`)가 SSE 를 **쿼리 없이** 열어 전량을 받고, 이벤트마다 `local/watchlist.json` 을 확인해 감시 종목만 남긴다. 서버에는 아무 상태도 두지 않는다 — 쿼리는 접속 시점에 굳어, 목록을 고쳐도 듣지 않게 만든다.
-9. 사전 조건(사람, 1회): gw 가 `/api/events/stream`(SSE)·`/api/events` 를 제공하도록 기동돼 있을 것, API 키를 환경변수로 준비. Telegram 운영자 채널을 쓸 때만 봇 생성·`operator_chat_id` 확인이 필요하다. 테스트 실행: `uv run --no-project --with pytest pytest -q`.
+9. **운영 중에는 테스트 스위트를 돌리지 않는다.** 테스트가 실제 어댑터를 띄우고, 기동 정리는 내 uid 의 `bin/inbound_rrr.py` 를 전부 종료한다 — 운영 어댑터가 함께 죽는다.
+10. 사전 조건(사람, 1회): gw 가 `/api/events/stream`(SSE)·`/api/events` 를 제공하도록 기동돼 있을 것, API 키를 환경변수로 준비. Telegram 운영자 채널을 쓸 때만 봇 생성·`operator_chat_id` 확인이 필요하다. 테스트 실행: `uv run --no-project --with pytest pytest -q`.
 
 ## 2. 장중 — 다이제스트·30분 체크·주문·협의
 

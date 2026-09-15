@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 
@@ -522,11 +523,14 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
             except (OSError, ValueError):
                 pass
 
-    def test_cleanup_does_not_touch_an_adapter_of_another_local_dir(self):
-        """다른 $RS_LOCAL 을 보는 어댑터는 건드리지 않는다.
+    def test_cleanup_takes_every_adapter_of_my_uid(self):
+        """내 uid 의 어댑터는 $RS_LOCAL 이 달라도 정리한다 — 하나만 살아야 하기 때문이다.
 
-        cwd 만 보면 같은 저장소에서 도는 **다른 배치**까지 죽인다 — 이 테스트 스위트가
-        운영 어댑터를 SIGTERM 했다(라이브에서 실제로 일어났다).
+        인자로 범위를 좁히면 플래그 이름을 바꾸는 순간 조용히 깨진다. 옛 이름으로 뜬
+        어댑터가 정리되지 않고 남아, 두 어댑터가 같은 세션에 배달했다(라이브에서 났다).
+        식별은 **스크립트 이름 하나**로만 하고 범위는 **내 uid** 로 좁힌다.
+
+        대가: 이 스위트를 돌리면 운영 어댑터도 같이 죽는다. 운영 중에는 돌리지 않는다.
         """
         other = os.path.join(self.d, "other")
         os.makedirs(os.path.join(self.d, "bin"), exist_ok=True)
@@ -541,14 +545,25 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
                    RS_ADAPTER_GRACE_SEC="0", RS_CLEANUP_TRIES="3")
         r = subprocess.run(["bash", START, "--role", "lead", "--adapter-only"], capture_output=True,
                            text=True, env=env, cwd=ROOT, timeout=60)
-        self.assertNotIn(f"pid={proc.pid}", r.stdout + r.stderr, "다른 배치의 어댑터를 정리했다")
-        self.assertIsNone(proc.poll(), "다른 배치의 어댑터를 죽였다")
+        self.assertIn(f"pid={proc.pid}", r.stdout + r.stderr, "다른 $RS_LOCAL 의 어댑터를 지나쳤다")
+        for _ in range(50):
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+        self.assertIsNotNone(proc.poll(), "정리 대상인데 살아남았다")
         pidf = os.path.join(self.d, "local", "inbound.pid")
         if os.path.exists(pidf):
             try:
                 os.kill(int(open(pidf).read().strip()), 9)
             except (OSError, ValueError):
                 pass
+
+    def test_cleanup_is_scoped_to_my_uid(self):
+        """다른 사용자의 프로세스는 내 것이 아니다 — ps 가 uid 로 좁혀져 있어야 한다."""
+        with open(START, encoding="utf-8") as f:
+            cleanup = f.read().split("--- ④ 인바운드 어댑터")[1].split("mkdir -p")[0]
+        self.assertIn("id -u", cleanup, "내 uid 를 구하지 않는다")
+        self.assertRegex(cleanup, r"\$2 ?== ?u", "ps 결과를 uid 로 거르지 않는다")
 
     def test_start_sh_refuses_when_previous_adapter_will_not_die(self):
         """SIGTERM 을 무시하는 어댑터가 남아 있으면 기동하지 않는다.
@@ -578,9 +593,12 @@ class CleanupWaitsForDeathTest(unittest.TestCase):
         """kill 뒤 생존 확인이 소스에 남아 있어야 한다(리팩터로 사라지기 쉬운 줄)."""
         with open(START, encoding="utf-8") as f:
             src = f.read()
-        cleanup = src.split("고아 어댑터만 표적 정리")[1].split("어댑터 백그라운드 기동")[0]
+        cleanup = src.split("--- ④ 인바운드 어댑터")[1].split("mkdir -p")[0]
         self.assertIn("kill -0", cleanup, "종료 확인 없이 바로 새로 띄운다")
         self.assertRegex(cleanup, r"exit 1", "죽지 않았을 때 중단하지 않는다")
+        # 인자로 식별하면 플래그 이름을 바꾸는 순간 조용히 깨진다(라이브에서 났다).
+        for arg in ("--watchlist", "--cursor", "--delivery-log", "RS_LOCAL"):
+            self.assertNotIn(arg, cleanup, f"정리가 인자 '{arg}' 로 식별한다")
 
 
 if __name__ == "__main__":
