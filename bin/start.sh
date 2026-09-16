@@ -184,15 +184,19 @@ if [ "$ROLE" = "lead" ]; then
   mkdir -p "$RS_LOCAL"
 
   # --- 인바운드 어댑터 백그라운드 기동 (배달만) --------------------------------------
+  # bin/detach.py 를 거쳐 **자기 세션·자기 그룹**으로 띄운다. 스크립트의 `&` 는 새 그룹을 만들지
+  # 않고 ⑥의 exec 는 PID 를 지키므로, 그냥 띄우면 어댑터의 그룹이 곧 claude 의 그룹이 되어
+  # 그 그룹에 가는 시그널을 함께 맞는다(장중 침묵사 → 진입 트리거 유실). detach 는 exec 라
+  # `$!` 가 그대로 어댑터다. stdin 은 /dev/null — 터미널에 남기지 않는다.
   # 경로는 전부 $RS_LOCAL 을 따른다. 어댑터 기본값은 저장소의 local/ 로 하드코딩돼 있어,
   # 넘기지 않으면 RS_LOCAL 을 옮겨도 커서와 배달 로그만 진짜 파일에 쓴다(테스트가 운영 로그를
   # 오염시킨다 — 실제로 그랬다).
   ADAPTER="bin/inbound_rrr.py"
   PATHS="--watchlist $RS_LOCAL/watchlist.json --delivery-log $RS_LOCAL/delivery.jsonl --inbox $RS_LOCAL/inbox.jsonl"
   if [ "$DELIVER" = "herdr" ]; then
-    nohup python3 "$ADAPTER" --deliver herdr --target "$RS_TARGET" $PATHS >> "$RS_LOCAL/inbound.log" 2>&1 &
+    python3 bin/detach.py nohup python3 "$ADAPTER" --deliver herdr --target "$RS_TARGET" $PATHS < /dev/null >> "$RS_LOCAL/inbound.log" 2>&1 &
   else
-    nohup python3 "$ADAPTER" --deliver "$DELIVER" $PATHS >> "$RS_LOCAL/inbound.log" 2>&1 &
+    python3 bin/detach.py nohup python3 "$ADAPTER" --deliver "$DELIVER" $PATHS < /dev/null >> "$RS_LOCAL/inbound.log" 2>&1 &
   fi
   RS_ADAPTER_PID=$!
   echo "$RS_ADAPTER_PID" > "$RS_LOCAL/inbound.pid"
