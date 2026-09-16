@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """rrr-swing 감시 목록 CLI — 세션(LLM)이 지금 보는 종목을 적어 둔다. 판단 0.
 
-  bin/watchlist.py set 006800 042700 [--append-ledger]   # 전면 교체
-  bin/watchlist.py add 006800 --note "보유 120주"          # 부분 추가(나머지 보존)
-  bin/watchlist.py drop 042700                            # 부분 제거(멱등)
+  bin/watchlist.py set 006800 042700                      # 전면 교체
+  bin/watchlist.py add 006800 --note "보유 120주"           # 부분 추가(나머지 보존)
+  bin/watchlist.py drop 042700                             # 부분 제거(멱등)
   bin/watchlist.py show
   bin/watchlist.py clear
+
+쓰는 명령(set·add·drop·clear)은 `--append-ledger` 로 원장에 한 줄 남긴다. 서브명령 뒤에 붙인다:
+  bin/watchlist.py add 006800 --note "보유 120주" --append-ledger
 
 파일은 `local/watchlist.json`, 형태는 종목 → 메모:
 
@@ -122,14 +125,21 @@ def main(argv=None) -> int:
     ap.add_argument("--path", default="local/watchlist.json")
     ap.add_argument("--config", default="config/config.json")
     ap.add_argument("--ledger", default="local/ledger.jsonl")
-    ap.add_argument("--append-ledger", action="store_true")
-    ap.add_argument("--now", default=None)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p_set = sub.add_parser("set", help="전면 교체"); p_set.add_argument("symbols", nargs="*"); p_set.add_argument("--note", default=None)
-    p_add = sub.add_parser("add", help="부분 추가"); p_add.add_argument("symbol"); p_add.add_argument("--note", default=None)
-    p_drop = sub.add_parser("drop", help="부분 제거"); p_drop.add_argument("symbol")
+
+    def writing(name, help_):
+        """쓰는 명령. 사람이 실제로 치는 순서(`add 006800 --note … --append-ledger`)로 받는다 —
+        부모 파서에 두면 서브명령 **앞**에서만 먹고 뒤에 치면 죽는다."""
+        q = sub.add_parser(name, help=help_)
+        q.add_argument("--append-ledger", action="store_true")
+        q.add_argument("--now", default=None)
+        return q
+
+    p_set = writing("set", "전면 교체"); p_set.add_argument("symbols", nargs="*"); p_set.add_argument("--note", default=None)
+    p_add = writing("add", "부분 추가"); p_add.add_argument("symbol"); p_add.add_argument("--note", default=None)
+    p_drop = writing("drop", "부분 제거"); p_drop.add_argument("symbol")
     sub.add_parser("show", help="현재 목록")
-    sub.add_parser("clear", help="비우기")
+    writing("clear", "비우기")
     a = ap.parse_args(argv)
 
     account = "account"
@@ -138,8 +148,9 @@ def main(argv=None) -> int:
             account = json.load(f).get("account_id") or account
     except Exception:  # noqa: BLE001 - 목록 편집이 config 부재로 막히지 않는다
         pass
-    ledger = a.ledger if a.append_ledger else None
-    kw = {"now": a.now, "account_id": account, "ledger_path": ledger}
+    # show 는 쓰지 않으므로 이 인자들을 갖지 않는다.
+    ledger = a.ledger if getattr(a, "append_ledger", False) else None
+    kw = {"now": getattr(a, "now", None), "account_id": account, "ledger_path": ledger}
     try:
         if a.cmd == "set":
             out = set_symbols(a.path, a.symbols, note=a.note, **kw)

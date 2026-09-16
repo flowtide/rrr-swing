@@ -96,6 +96,30 @@ class LedgerTrail(Base):
         for gone in ("event_types", "sessions", "expires_at"):
             self.assertNotIn(gone, rec, f"폐기된 필드 '{gone}' 를 원장에 쓴다")
 
+    def test_cli_append_ledger_works_after_the_subcommand(self):
+        """사람이 실제로 치는 순서로 먹어야 한다 — `add <종목> --note … --append-ledger`.
+
+        부모 파서에 두면 서브명령 **앞**에서만 먹고, 뒤에 치면 `unrecognized arguments` 로
+        죽는다. 문서의 예시가 전부 뒤에 두는 형태였고, 그 형태가 동작하지 않았다.
+        """
+        r = self.run_cli("add", "006800", "--note", "보유 120주", "--append-ledger")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(self.ledger), "원장에 쓰지 않았다")
+        with open(self.ledger, encoding="utf-8") as f:
+            rec = json.loads(f.readline())
+        self.assertEqual(rec["evt"], "subscription")
+        self.assertEqual(rec["symbols"], ["006800"])
+
+    def test_cli_append_ledger_on_every_writing_subcommand(self):
+        """쓰는 명령은 전부 같은 자리에서 받는다 — 하나만 되면 나머지에서 또 물린다."""
+        for args in (["set", "006800"], ["add", "042700"], ["drop", "042700"], ["clear"]):
+            with self.subTest(cmd=args[0]):
+                if os.path.exists(self.ledger):
+                    os.remove(self.ledger)
+                r = self.run_cli(*args, "--append-ledger")
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertTrue(os.path.exists(self.ledger), f"{args[0]} 가 원장에 쓰지 않았다")
+
     def test_no_ledger_write_without_the_flag(self):
         wl.set_symbols(self.p, ["006800"], now="2026-09-15T14:00:00")
         self.assertFalse(os.path.exists(self.ledger))
