@@ -62,11 +62,19 @@ def tier_group(t: dict) -> str:
 
 def build_panel(out_dir: str, date: str) -> list[dict]:
     rs_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-    meta_path = os.path.join(rs_root, "config", "stock_meta_18.json")
-    if not os.path.exists(meta_path):
-        meta_path = os.path.join(os.path.dirname(out_dir.rstrip("/")), "stock_meta_18.json")
-    if not os.path.exists(meta_path):
-        meta_path = os.path.join(os.path.dirname(out_dir.rstrip("/")), "sector_map_kospi16.json")
+    meta_path = None
+    for cand in [
+        os.path.join(rs_root, "config", "stock_meta.json"),
+        os.path.join(os.path.dirname(out_dir.rstrip("/")), "stock_meta.json"),
+        os.path.join(rs_root, "config", "stock_meta_18.json"),
+        os.path.join(os.path.dirname(out_dir.rstrip("/")), "stock_meta_18.json"),
+        os.path.join(os.path.dirname(out_dir.rstrip("/")), "sector_map_kospi16.json"),
+    ]:
+        if os.path.exists(cand):
+            meta_path = cand
+            break
+    if not meta_path:
+        meta_path = os.path.join(rs_root, "config", "stock_meta.json")
     smap = json.load(open(meta_path, encoding="utf-8"))
     ddir = os.path.join(out_dir, "detail")
     snap = sorted(d for d in os.listdir(ddir) if d.isdigit())[-1]

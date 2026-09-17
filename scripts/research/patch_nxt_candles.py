@@ -27,12 +27,19 @@ def main():
     nxt_snap_dir = os.path.join(out_base, "detail", "200500")
     os.makedirs(nxt_snap_dir, exist_ok=True)
 
-    # 종목 리스트 로드 (config/stock_meta_18.json 우선, 없으면 gw watch-groups)
+    # 종목 리스트 로드 (config/stock_meta.json 우선, 없으면 gw watch-groups)
     symbols = []
-    meta_path = os.path.join(rs_dir, "config", "stock_meta_18.json")
-    if not os.path.exists(meta_path):
-        meta_path = os.path.join(rs_dir, "local", "research", "orderbook", "stock_meta_18.json")
-    if os.path.exists(meta_path):
+    meta_path = None
+    for cand in [
+        os.path.join(rs_dir, "config", "stock_meta.json"),
+        os.path.join(rs_dir, "local", "research", "orderbook", "stock_meta.json"),
+        os.path.join(rs_dir, "config", "stock_meta_18.json"),
+        os.path.join(rs_dir, "local", "research", "orderbook", "stock_meta_18.json"),
+    ]:
+        if os.path.exists(cand):
+            meta_path = cand
+            break
+    if meta_path:
         meta = json.load(open(meta_path, encoding="utf-8"))
         symbols = sorted(meta.keys())
     else:
