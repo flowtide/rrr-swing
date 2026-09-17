@@ -3,8 +3,8 @@
 Date: 2026-09-15 (관측 18:20~19:15 KST, NXT 애프터마켓)
 Scope: rrr 의 호가 파생값(5분봉 OFI 근사·1호가 불균형·스프레드·소진·현상 라벨)이 rrr-swing 트레이더의
 **진입·청산·집행 타이밍**에 어떻게 쓰일 수 있는지. 사실(코드·문서·실측) → 해석 → 최소 변경 제안 → 검증 계획 순.
-근거 문서: rrr `docs/rrr-ingestor-orderbook-enable-analysis.md`, `docs/market_context_bars_handoff.md`,
-`docs/orderbook_summary_timeseries_handoff.md`. 이 문서는 **제안**이며 계약(AGENTS.md·03-evidence_guide.md)을 바꾸지 않는다.
+근거 문서(rrr 레포 docs): `rrr-ingestor-orderbook-enable-analysis.md`, `market_context_bars_handoff.md`,
+`orderbook_summary_timeseries_handoff.md`. 이 문서는 **제안**이며 계약(AGENTS.md·03-evidence_guide.md)을 바꾸지 않는다.
 
 ## 0. 요약
 
@@ -117,7 +117,7 @@ phenomena 빈도(ok 봉만 라벨이 붙는다): `sell_absorption` 39 · `ask_re
 
 ### 5.2 도달 경로 (rrr-gw)
 
-rrr-gw 는 `/api/*` GET 을 rrr-api 로 블랭킷 프록시한다(`rrr-gw/src/rrr_gw/authz.py:38-48`, `caddyfile.py:160-162`, `docs/api-contract.md:39,90`).
+rrr-gw 는 `/api/*` GET 을 rrr-api 로 블랭킷 프록시한다(`rrr-gw/src/rrr_gw/authz.py:38-48`, `caddyfile.py:160-162`, rrr-gw `api-contract.md:39,90`).
 `/api/stocks/{sym}/market-context` 는 이미 통과한다. MCP 도구 87개·`kiwoom-gw` 스킬은 rrr 호가를 다루지 않는다(별도 서버 kiwoom-sdk-mcp).
 
 ### 5.3 수집기 (rrr-ingestor, 0D on)
