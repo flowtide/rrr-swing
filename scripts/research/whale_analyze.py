@@ -219,7 +219,7 @@ def main(argv=None) -> int:
         """큰손 매수인데 지수는 그 봉에 내린(≤−5bp) 봉, 또는 큰손 매도인데 지수는 오른 봉 — 시장을 거스른 큰손"""
         s = sig_r(r)
         return s if s and r["idx_bp"] is not None and (r["idx_bp"] * s) <= -5 else 0
-    print("  ① 흡수 — 큰손 R>=0.4 & 같은 봉 초과수익률 <= 0 (종목이 지수만큼도 못 움직임)")
+    print("  ① 큰손 흡수 — 큰손 R>=0.4 & 같은 봉 초과수익률 <= 0 (종목이 지수만큼도 못 움직임)")
     report("    raw", not_moved_ex); report("    excess", not_moved_ex, excess=True)
     print("  ①' 시장 역행 — 큰손 R>=0.4 & 지수 같은 봉 반대(|idx|>=5bp)")
     report("    raw", absorb_vs_market); report("    excess", absorb_vs_market, excess=True)

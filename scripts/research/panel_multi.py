@@ -192,9 +192,9 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     print(f" {'가설':<28} | {'사건 수':<6} | {'6봉 일치율(bp)':<16} | {'12봉 일치율(bp)':<16} | {'KRX 종가(bp)':<16} | {'NXT 종가(bp)':<16} | {'개미 대조군(6봉/KRX)':<20} | {'판정':<8}")
     print("-" * 128)
     ant_summary = f"{ant['horizons'][6]['pct']:.0f}% / {ant['horizons']['krx']['pct']:.0f}% (R>={ant_th:.4f})"
-    print(f" {'H1 ① 흡수':<26} | {h1_n:6d} | {fmt_cell(h1, 6):<16} | {fmt_cell(h1, 12):<16} | {fmt_cell(h1, 'krx'):<16} | {fmt_cell(h1, 'nxt'):<16} | {ant_summary:<20} | {h1_eval:<8}")
-    print(f" {'H2 ① & 외국인 당일누적 반대':<20} | {h2_n:6d} | {fmt_cell(h2, 6):<16} | {fmt_cell(h2, 12):<16} | {fmt_cell(h2, 'krx'):<16} | {fmt_cell(h2, 'nxt'):<16} | {'—':<20} | {h2_eval:<8}")
-    print(f" {'H3 ① & 기관 당일누적 같음':<22} | {h3_n:6d} | {fmt_cell(h3, 6):<16} | {fmt_cell(h3, 12):<16} | {fmt_cell(h3, 'krx'):<16} | {fmt_cell(h3, 'nxt'):<16} | {'—':<20} | {h3_eval:<8}")
+    print(f" {'H1 ① 큰손 흡수':<24} | {h1_n:6d} | {fmt_cell(h1, 6):<16} | {fmt_cell(h1, 12):<16} | {fmt_cell(h1, 'krx'):<16} | {fmt_cell(h1, 'nxt'):<16} | {ant_summary:<20} | {h1_eval:<8}")
+    print(f" {'H2 큰손 흡수 & 외국인 반대':<20} | {h2_n:6d} | {fmt_cell(h2, 6):<16} | {fmt_cell(h2, 12):<16} | {fmt_cell(h2, 'krx'):<16} | {fmt_cell(h2, 'nxt'):<16} | {'—':<20} | {h2_eval:<8}")
+    print(f" {'H3 큰손 흡수 & 기관 동행':<22} | {h3_n:6d} | {fmt_cell(h3, 6):<16} | {fmt_cell(h3, 12):<16} | {fmt_cell(h3, 'krx'):<16} | {fmt_cell(h3, 'nxt'):<16} | {'—':<20} | {h3_eval:<8}")
     print(f" {'H4 ② 숨은 매집':<25} | {h4_n:6d} | {fmt_cell(h4, 6):<16} | {fmt_cell(h4, 12):<16} | {fmt_cell(h4, 'krx'):<16} | {fmt_cell(h4, 'nxt'):<16} | {'—':<20} | {h4_eval:<8}")
     print(f" {'H5 종목 이례도 |z|>=1.5 되돌림':<18} | {h5_n:6d} | {fmt_cell(h5, 6):<16} | {fmt_cell(h5, 12):<16} | {fmt_cell(h5, 'krx'):<16} | {fmt_cell(h5, 'nxt'):<16} | {'—':<20} | {h5_eval:<8}")
     print(f" {'H0 축 단독':<28} | {'—':<6} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<20} | {'기준선 안':<8}")
@@ -214,7 +214,7 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
             sh1 = compute_stats(sub_p, s_absorb)
             sh4 = compute_stats(sub_p, s_hidden)
             sh5 = compute_stats(sub_p, s_z(1.5, True))
-            print(f" {tier_name:<9} | {'H1 ① 흡수':<20} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
+            print(f" {tier_name:<9} | {'H1 ① 큰손 흡수':<18} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
             print(f" {'〃':<12} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
             print(f" {'〃':<12} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
             if tier_name.startswith("대형주"):
@@ -242,7 +242,7 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
             sh1 = compute_stats(sub_p, s_absorb)
             sh4 = compute_stats(sub_p, s_hidden)
             sh5 = compute_stats(sub_p, s_z(1.5, True))
-            print(f" {s_label:<13} | {'H1 ① 흡수':<20} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
+            print(f" {s_label:<13} | {'H1 ① 큰손 흡수':<18} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
             print(f" {'〃':<20} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
             print(f" {'〃':<20} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
             print("-" * 116)
@@ -282,7 +282,7 @@ def main(argv=None) -> int:
     agree("큰손 봉 순매수 vs 시장 프로그램 5분 증분(ka90005)", panel, lambda r: r.get("whale_net"), lambda r: r.get("mprog_d5"))
     agree("큰손 당일누적 vs 업종 외국인 당일누적", panel, lambda r: r.get("whale_cum_ratio"), lambda r: r.get("sect_frgn_cum"))
 
-    print("\n[① 흡수] 큰손 R>=0.4 & 같은 봉 초과수익<=0 — 사건 단위, EX")
+    print("\n[① 큰손 흡수] 큰손 R>=0.4 & 같은 봉 초과수익<=0 — 사건 단위, EX")
     report("① 전체", panel, s_absorb)
     for name, ax in (("외국인 당일누적", lambda r: r.get("frgn_cum")), ("기관 당일누적", lambda r: r.get("orgn_cum")), ("외국인 5분증분", lambda r: r.get("frgn_d5")),
                      ("시장 프로그램 5분증분", lambda r: r.get("mprog_d5")), ("업종 외국인 누적", lambda r: r.get("sect_frgn_cum")), ("시장 외국인 누적", lambda r: r.get("mkt_frgn_cum"))):
@@ -294,7 +294,7 @@ def main(argv=None) -> int:
 
     # T1 대조군
     q, th_w, th_m, th_a, w_cnt, tot_cnt = quantile_match_thresholds(panel, 0.4)
-    print("\n[⑤ 흡수 대조군 — 고정 및 분위수 매칭 (T1)]")
+    print("\n[⑤ 큰손 흡수 대조군 — 고정 및 분위수 매칭 (T1)]")
     print(f"  [분위수 임계값] q={q:.4f}, 큰손={th_w:.4f}, 중간={th_m:.4f}, 개미={th_a:.4f}")
     report("큰손 R>=0.4 (H1 기준)", panel, make_absorb("whale_ratio", 0.4))
     report("중간 R>=0.4 (고정 0.4)", panel, make_absorb("mid_ratio", 0.4))
@@ -309,7 +309,7 @@ def main(argv=None) -> int:
     report("H5 |whale_z|>=2.0 되돌림(반대)", panel, s_z(2.0, True))
 
     # T4 투자자 신선도
-    print("\n[⑦ 투자자 신선도별 흡수 ① 층화 (T4)]")
+    print("\n[⑦ 투자자 신선도별 큰손 흡수 ① 층화 (T4)]")
     report("① frgn_stale_min <= 30 (샘플 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_stale_min") is not None and r["frgn_stale_min"] <= 30 else 0)
     report("① frgn_stale_min > 30 (샘플 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_stale_min") is not None and r["frgn_stale_min"] > 30 else 0)
 

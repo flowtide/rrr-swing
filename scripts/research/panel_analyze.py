@@ -363,7 +363,7 @@ def main(argv=None) -> int:
     agree("큰손 봉 순매수 vs 시장 프로그램 5분 증분(ka90005)", panel, lambda r: r["whale_net"], lambda r: r["mprog_d5"])
     agree("큰손 당일누적 vs 업종 외국인 당일누적", panel, lambda r: r["whale_cum_ratio"], lambda r: r["sect_frgn_cum"])
 
-    print("\n[① 흡수] 큰손 R>=0.4 & 같은 봉 초과수익<=0 — 사건 단위, EX")
+    print("\n[① 큰손 흡수] 큰손 R>=0.4 & 같은 봉 초과수익<=0 — 사건 단위, EX")
     report("① 전체", panel, s_absorb)
     for name, ax in (("외국인 당일누적", lambda r: r["frgn_cum"]), ("기관 당일누적", lambda r: r["orgn_cum"]), ("외국인 5분증분", lambda r: r["frgn_d5"]),
                      ("시장 프로그램 5분증분", lambda r: r["mprog_d5"]), ("업종 외국인 누적", lambda r: r["sect_frgn_cum"]), ("시장 외국인 누적", lambda r: r["mkt_frgn_cum"])):
@@ -396,8 +396,8 @@ def main(argv=None) -> int:
     report("시장 프로그램 5분증분 같은 방향", panel, with_axis(base, lambda r: r["mprog_d5"], 1))
     report("시장 프로그램 5분증분 반대 방향", panel, with_axis(base, lambda r: r["mprog_d5"], -1))
 
-    # T1: 흡수 대조군 (고정 0.2, 0.4 및 분위수 매칭)
-    print("\n[⑤ 흡수 대조군 — 고정 및 분위수 매칭 (T1)]")
+    # T1: 큰손 흡수 대조군 (고정 0.2, 0.4 및 분위수 매칭)
+    print("\n[⑤ 큰손 흡수 대조군 — 고정 및 분위수 매칭 (T1)]")
     def make_absorb(field, th):
         def sel(r):
             v = r.get(field) or 0.0
@@ -438,7 +438,7 @@ def main(argv=None) -> int:
     report("H5 |whale_z|>=2.0 되돌림(반대)", panel, s_z(2.0, True))
 
     # T4: 투자자 신선도 층화
-    print("\n[⑦ 투자자 신선도별 흡수 ① 층화 (T4)]")
+    print("\n[⑦ 투자자 신선도별 큰손 흡수 ① 층화 (T4)]")
     report("① frgn_stale_min <= 30 (샘플 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_stale_min") is not None and r["frgn_stale_min"] <= 30 else 0)
     report("① frgn_stale_min > 30 (샘플 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_stale_min") is not None and r["frgn_stale_min"] > 30 else 0)
     report("① frgn_change_stale <= 30 (수치변동 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_change_stale_min") is not None and r["frgn_change_stale_min"] <= 30 else 0)
