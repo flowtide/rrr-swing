@@ -81,8 +81,11 @@ def compute_stats(panel: list[dict], sel, excess: bool = True) -> dict:
     eps = episodes(panel, sel)
     stats = {"events": len(eps), "horizons": {}}
     for k in HORIZONS:
-        key = f"fwdex{k}" if excess else f"fwd{k}"
-        xs = [e[key] * e["_dir"] for e in eps if e.get(key) is not None]
+        xs = []
+        for e in eps:
+            v = e.get(f"fwdex{k}") if (excess and e.get(f"fwdex{k}") is not None) else e.get(f"fwd{k}")
+            if v is not None:
+                xs.append(v * e["_dir"])
         same = sum(1 for x in xs if x > 0)
         tot = sum(1 for x in xs if x != 0)
         pct = 100 * same / tot if tot else 0.0
@@ -90,8 +93,11 @@ def compute_stats(panel: list[dict], sel, excess: bool = True) -> dict:
         stats["horizons"][k] = {"mean_bp": mean_bp, "same": same, "tot": tot, "pct": pct}
 
     for h_name in ("krx", "nxt"):
-        key = f"fwdex_{h_name}" if excess else f"fwd_{h_name}"
-        xs = [e[key] * e["_dir"] for e in eps if e.get(key) is not None]
+        xs = []
+        for e in eps:
+            v = e.get(f"fwdex_{h_name}") if (excess and e.get(f"fwdex_{h_name}") is not None) else e.get(f"fwd_{h_name}")
+            if v is not None:
+                xs.append(v * e["_dir"])
         same = sum(1 for x in xs if x > 0)
         tot = sum(1 for x in xs if x != 0)
         pct = 100 * same / tot if tot else 0.0
@@ -213,6 +219,33 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
             print(f" {'〃':<12} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
             if tier_name.startswith("대형주"):
                 print("-" * 116)
+        print("=" * 116)
+
+    # 세션별 (NXT 프리마켓 vs KRX 정규장 vs NXT 야간장) 층화 채점표
+    pre_panel = [r for r in panel if r.get("session") == "pre"]
+    reg_panel = [r for r in panel if r.get("session") == "reg"]
+    post_panel = [r for r in panel if r.get("session") == "post"]
+
+    if pre_panel or reg_panel or post_panel:
+        print("\n" + "=" * 116)
+        print(" [세션별 층화 채점표 (NXT 프리마켓 vs KRX 정규장 vs NXT 야간장)]")
+        print("-" * 116)
+        print(f" {'세션 구분':<14} | {'가설':<22} | {'사건 수':<6} | {'6봉 일치율(bp)':<16} | {'12봉 일치율(bp)':<16} | {'KRX 종가(bp)':<16} | {'NXT 종가(bp)':<16}")
+        print("-" * 116)
+        for s_label, sub_p in [
+            ("NXT 프리 (08:00~08:50)", pre_panel),
+            ("KRX 정규 (09:00~15:20)", reg_panel),
+            ("NXT 야간 (15:40~20:00)", post_panel),
+        ]:
+            if not sub_p:
+                continue
+            sh1 = compute_stats(sub_p, s_absorb)
+            sh4 = compute_stats(sub_p, s_hidden)
+            sh5 = compute_stats(sub_p, s_z(1.5, True))
+            print(f" {s_label:<13} | {'H1 ① 흡수':<20} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
+            print(f" {'〃':<20} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
+            print(f" {'〃':<20} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
+            print("-" * 116)
         print("=" * 116)
 
 

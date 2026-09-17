@@ -1,9 +1,9 @@
 #!/bin/bash
 # 연구 수집기 하루치 기동/마감 — docs/09 §5. 판단 0, 읽기 전용.
-#   start_daily.sh            : 장 전 실행. 유니버스(gw watch-groups 합집합)를 받아 샘플러 3종을 detach 로 띄운다(15:45 자동 종료).
+#   start_daily.sh            : 장 전 실행(NXT 08:00 개장 전 07:55). 유니버스를 받아 샘플러 3종을 detach 로 띄운다(20:05 자동 종료).
 #   start_daily.sh post       : KRX 정규장 마감 후 실행(15:50). 글로벌 market-context(bars=0)를 받고 1차 패널/집계를 돌려 report_*.txt 를 남긴다.
 #   start_daily.sh post_nxt   : NXT 마감 후 실행(20:05). 20:00 NXT 캔들을 게이트웨이에서 사후 동기화하고 패널을 재집계한다.
-#   start_daily.sh schedule   : 08:50 start, 15:50 post, 20:05 post_nxt 를 실행하는 원샷 대기 프로세스 3개를 detach 로 띄운다.
+#   start_daily.sh schedule   : 07:55 start, 15:50 post, 20:05 post_nxt 를 실행하는 원샷 대기 프로세스 3개를 detach 로 띄운다.
 #   start_daily.sh universe   : 유니버스 종목 csv 출력(점검용).
 set -u
 RS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -11,8 +11,8 @@ PROVIDER_DIR="${PROVIDER_DIR:-$(dirname "$RS")/rrr}"
 
 if [ -z "${DATE:-}" ]; then
   now=$(date +%s)
-  t_today_post=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%F) 15:50" +%s)
-  if [ "${1:-}" = "schedule" ] && [ "$now" -gt "$t_today_post" ]; then
+  t_today_nxt=$(date -j -f "%Y-%m-%d %H:%M" "$(date +%F) 20:05" +%s)
+  if [ "${1:-}" = "schedule" ] && [ "$now" -gt "$t_today_nxt" ]; then
     DATE=$(date -v+1d +%F)
   else
     DATE=$(date +%F)
@@ -44,9 +44,9 @@ case "${1:-start}" in
     SINCE=$(python3 -c "from datetime import datetime,timezone,timedelta; y,m,d=map(int,'$DATE'.split('-')); print(int(datetime(y,m,d,tzinfo=timezone(timedelta(hours=9))).timestamp()*1000))")
     echo "$(date +%T) start date=$DATE symbols=$SYMS" >> "$OUT/start_daily.log"
     cd "$RS"
-    python3 bin/detach.py python3 scripts/research/ob_sampler.py --symbols "$SYMS" --interval 300 --until 15:45 --since "${SINCE}-0" --out "$OUT" < /dev/null >> "$OUT/sampler.out" 2>&1 &
-    python3 bin/detach.py python3 scripts/research/ob_sampler.py --mode detail --symbols "$SYMS" --interval 300 --until 15:45 --out "$OUT/detail" < /dev/null >> "$OUT/detail/sampler.out" 2>&1 &
-    cd "$PROVIDER_DIR" && ( set -a; . ./.env; set +a; python3 "$RS/bin/detach.py" ./.venv/bin/python "$RS/scripts/research/market_sampler.py" --interval 60 --until 15:45 --out "$OUT/market" < /dev/null >> "$OUT/market/sampler.out" 2>&1 & )
+    python3 bin/detach.py python3 scripts/research/ob_sampler.py --symbols "$SYMS" --interval 300 --until 20:05 --since "${SINCE}-0" --out "$OUT" < /dev/null >> "$OUT/sampler.out" 2>&1 &
+    python3 bin/detach.py python3 scripts/research/ob_sampler.py --mode detail --symbols "$SYMS" --interval 300 --until 20:05 --out "$OUT/detail" < /dev/null >> "$OUT/detail/sampler.out" 2>&1 &
+    cd "$PROVIDER_DIR" && ( set -a; . ./.env; set +a; python3 "$RS/bin/detach.py" ./.venv/bin/python "$RS/scripts/research/market_sampler.py" --interval 60 --until 20:05 --out "$OUT/market" < /dev/null >> "$OUT/market/sampler.out" 2>&1 & )
     sleep 15; echo "$(date +%T) alive: $(pgrep -fl 'ob_sampler.py|market_sampler.py' | wc -l | tr -d ' ') procs" >> "$OUT/start_daily.log"
     ;;
   post)
@@ -66,7 +66,7 @@ case "${1:-start}" in
   schedule)
     mkdir -p "$OUT"
     now=$(date +%s)
-    t_start=$(date -j -f "%Y-%m-%d %H:%M" "$DATE 08:50" +%s)
+    t_start=$(date -j -f "%Y-%m-%d %H:%M" "$DATE 07:55" +%s)
     t_post=$(date -j -f "%Y-%m-%d %H:%M" "$DATE 15:50" +%s)
     t_nxt=$(date -j -f "%Y-%m-%d %H:%M" "$DATE 20:05" +%s)
     d1=$((t_start-now)); d2=$((t_post-now)); d3=$((t_nxt-now))

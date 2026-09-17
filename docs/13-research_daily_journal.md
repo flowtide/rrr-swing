@@ -117,31 +117,34 @@
 
 ```mermaid
 flowchart TD
-    A["08:50 원샷 기동<br>(start_daily.sh schedule)"] --> B["09:00~15:45 정규장 수집<br>(ob_sampler 2종 + market_sampler)"]
-    B --> C["15:50 1차 마감 집계<br>(global_market_context + panel_analyze)"]
+    A["07:55 원샷 기동<br>(NXT 08:00 개장 5분 전)"] --> B["08:00~20:05 전 세션 수집<br>(NXT 프리 + KRX 정규 + NXT 야간)"]
+    B --> C["15:50 1차 마감 집계<br>(정규장 종가 기준 패널 빌드)"]
     C --> D["20:05 NXT 캔들 동기화<br>(patch_nxt_candles.py)"]
-    D --> E["20:10 2차 최종 집계<br>(panel_analyze + panel_multi)"]
+    D --> E["20:10 2차 최종 집계<br>(세션별·시총별 층화 채점)"]
     E --> F["일일 보고서 작성 (docs/1X)<br>& 본 저널 갱신 (docs/13)"]
 ```
 
-1. **장 전 (08:50)**: `bash scripts/research/start_daily.sh schedule` 실행 (start, post, post_nxt 3단계 원샷 일괄 등록).
-2. **정규장 마감 (15:50)**: `start_daily.sh post` 자동 실행 $\rightarrow$ `global_market_context.json` 수집 및 1차 패널 빌드.
-3. **야간 마감 (20:05)**: `start_daily.sh post_nxt` 자동 실행 $\rightarrow$ `patch_nxt_candles.py`로 15:35~20:00 NXT 캔들 사후 동기화 및 패널 재집계.
-4. **최종 분석 및 다일 누적 채점 (20:10)**:
+1. **장 전 (07:55)**: `bash scripts/research/start_daily.sh schedule` 실행 (08:00 NXT 개장 전 07:55 기동, 15:50 post, 20:05 post_nxt 등록).
+2. **전 세션 실시간 수집 (08:00~20:05)**:
+   * NXT 프리마켓 (08:00~08:50) $\rightarrow$ KRX 정규장 (09:00~15:30) $\rightarrow$ NXT 야간장 (15:30~20:00).
+   * `ob_sampler.py`(2종) 및 `market_sampler.py`가 `--until 20:05`로 무중단 전 세션 실시간 스냅샷 수집.
+3. **정규장 마감 (15:50)**: `start_daily.sh post` 자동 실행 $\rightarrow$ `global_market_context.json` 수집 및 1차 패널 빌드.
+4. **야간 마감 (20:05)**: `start_daily.sh post_nxt` 자동 실행 $\rightarrow$ `patch_nxt_candles.py`로 NXT 캔들 사후 동기화 및 전 세션 최종 재집계.
+5. **최종 분석 및 다일 누적 채점 (20:10)**:
    ```bash
    python3 scripts/research/panel_analyze.py --out local/research/orderbook/<DATE> --date <DATE>
    python3 scripts/research/panel_multi.py --root local/research/orderbook --dates 2026-09-16,...,<DATE>
    ```
-5. **문서 갱신**:
+6. **문서 갱신**:
    * 당일 상세 보고서 `docs/1X-research_verification_result_<DATE>.md` 작성.
    * 본 저널(`docs/13-research_daily_journal.md`)의 요약표 및 일별 엔트리 누적 갱신.
 
 ---
 
-> [!NOTE] 3일차 (2026-09-18) 스케줄 예약 현황
-> 2026-09-17 22:14 기준으로 3일차 3단계 원샷 스케줄러 등록 완료:
-> - **08:50**: `start_daily.sh start` (수집기 3종 가동)
-> - **15:50**: `start_daily.sh post` (정규장 마감 1차 집계)
-> - **20:05**: `start_daily.sh post_nxt` (NXT 캔들 사후 동기화 및 패널 재집계)
+> [!NOTE] 3일차 (2026-09-18) 스케줄 예약 현황 (NXT 08:00 개장 반영)
+> 2026-09-18 07:16 기준으로 3일차 3단계 원샷 스케줄러 등록 완료:
+> - **07:55** (PID 44918): `start_daily.sh start` (NXT 08:00 개장 대비 수집기 3종 가동, `--until 20:05`)
+> - **15:50** (PID 44921): `start_daily.sh post` (정규장 마감 1차 집계)
+> - **20:05** (PID 44922): `start_daily.sh post_nxt` (NXT 야간 마감 2차 집계)
 
 

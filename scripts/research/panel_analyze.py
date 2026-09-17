@@ -130,11 +130,18 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
         k_krx = (kospi.get(f"{date}T15:20:00") or kospi.get(f"{date}T15:30:00") or (sorted(kospi.values(), key=lambda x: x.get("close", 0))[-1] if kospi else {})).get("close")
         tb = {t["ts_start"]: t for t in d.get("trade_buckets") or [] if not t["is_partial"] and t["ts_start"][:10] == date}
         kclose = {t: v["close"] for t, v in kospi.items()}
-        ts_list = sorted(t for t in tb if REG_START <= t[11:16] <= REG_END)
+        ts_list = sorted(t for t in tb if ("08:00" <= t[11:16] <= "15:20" or "15:40" <= t[11:16] <= "19:55"))
         cum_net = cum_tot = 0.0
         first = ts_list[0] if ts_list else None
         w_hist = []
         for ts in ts_list:
+            hhmm = ts[11:16]
+            if hhmm < "09:00":
+                sess = "pre"
+            elif hhmm <= "15:20":
+                sess = "reg"
+            else:
+                sess = "post"
             g = defaultdict(lambda: {"buy": 0.0, "sell": 0.0})
             for t in tb[ts]["tiers"]:
                 k = tier_group(t)
@@ -142,7 +149,7 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
             total = sum(v["buy"] + v["sell"] for v in g.values())
             net = {k: g[k]["buy"] - g[k]["sell"] for k in ("whale", "mid", "ant")}
             cum_net += net["whale"]; cum_tot += total
-            row = {"sym": sym, "ts": ts, "name": meta.get("name", sym), "sector": meta.get("up_name", "기타"),
+            row = {"sym": sym, "ts": ts, "session": sess, "name": meta.get("name", sym), "sector": meta.get("up_name", "기타"),
                    "size_tier": meta.get("size_tier", "대형주"), "market_cap_eok": meta.get("market_cap_eok"),
                    "whale_net": net["whale"], "mid_net": net["mid"], "ant_net": net["ant"], "bar_amt": total,
                    "whale_ratio": net["whale"] / total if total else 0.0, "mid_ratio": net["mid"] / total if total else 0.0,
@@ -165,7 +172,9 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
             row["idx_bp"] = ks["bp"] if ks else None
             row["breadth_down"] = (ks["falling"] > ks["rising"]) if ks and ks.get("rising") is not None else None
             row["same_ex"] = row["same_bp"] - ks["bp"] if (row["same_bp"] is not None and ks and ks["bp"] is not None) else None
-            c0 = closes.get(next_ts(first, -1)) or closes.get(first); i0 = (kospi.get(next_ts(first, -1)) or kospi.get(first) or {}).get("close"); i1 = (ks or {}).get("close")
+            c0 = closes.get(f"{date}T09:00:00") or closes.get(next_ts(first, -1)) or closes.get(first)
+            i0 = (kospi.get(f"{date}T09:00:00") or (next(iter(kospi.values())) if kospi else {})).get("close")
+            i1 = (ks or {}).get("close")
             row["cum_ex"] = ((cur / c0 - 1) - (i1 / i0 - 1)) * 1e4 if c0 and cur and i0 and i1 else None
             for k in HORIZONS:
                 ck, ik = closes.get(next_ts(ts, k)), kclose.get(next_ts(ts, k))
@@ -299,7 +308,8 @@ def make_absorb(field: str = "whale_ratio", th: float = 0.4):
     def sel(r):
         v = r.get(field) or 0.0
         s = 1 if v >= th else -1 if v <= -th else 0
-        return s if s and r.get("same_ex") is not None and r["same_ex"] * s <= 0 else 0
+        p_ret = r.get("same_ex") if r.get("same_ex") is not None else r.get("same_bp")
+        return s if s and p_ret is not None and p_ret * s <= 0 else 0
     return sel
 
 
@@ -310,7 +320,8 @@ def s_absorb(r: dict) -> int:
 def s_hidden(r: dict) -> int:
     w = r.get("whale_cum_ratio")
     s = 0 if w is None else 1 if w >= 0.2 else -1 if w <= -0.2 else 0
-    return s if s and r.get("cum_ex") is not None and sgn(r["cum_ex"]) * s == -1 else 0
+    c_ret = r.get("cum_ex") if r.get("cum_ex") is not None else r.get("same_bp")
+    return s if s and c_ret is not None and sgn(c_ret) * s == -1 else 0
 
 
 def with_axis(base, axis, want: int):
