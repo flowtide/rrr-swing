@@ -88,6 +88,16 @@ def compute_stats(panel: list[dict], sel, excess: bool = True) -> dict:
         pct = 100 * same / tot if tot else 0.0
         mean_bp = statistics.mean(xs) if xs else 0.0
         stats["horizons"][k] = {"mean_bp": mean_bp, "same": same, "tot": tot, "pct": pct}
+
+    for h_name in ("krx", "nxt"):
+        key = f"fwdex_{h_name}" if excess else f"fwd_{h_name}"
+        xs = [e[key] * e["_dir"] for e in eps if e.get(key) is not None]
+        same = sum(1 for x in xs if x > 0)
+        tot = sum(1 for x in xs if x != 0)
+        pct = 100 * same / tot if tot else 0.0
+        mean_bp = statistics.mean(xs) if xs else 0.0
+        stats["horizons"][h_name] = {"mean_bp": mean_bp, "same": same, "tot": tot, "pct": pct}
+
     return stats
 
 
@@ -125,7 +135,6 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     # H2: H1 통과 후, 부분집합 일치가 H1 전체보다 높음
     h2_n = h2["events"]
     h2_k6 = h2["horizons"][6]["pct"]
-    h2_k12 = h2["horizons"][12]["pct"]
     if h1_passed and h2_k6 > h1_k6 and h2_n >= 20:
         h2_eval = "통과"
     elif not h1_passed or h2_n < 20:
@@ -136,7 +145,6 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     # H3: H1 통과 후, 부분집합 일치가 H1 전체보다 높음
     h3_n = h3["events"]
     h3_k6 = h3["horizons"][6]["pct"]
-    h3_k12 = h3["horizons"][12]["pct"]
     if h1_passed and h3_k6 > h1_k6 and h3_n >= 20:
         h3_eval = "통과"
     elif not h1_passed or h3_n < 20:
@@ -166,18 +174,46 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     else:
         h5_eval = "미달"
 
-    print("\n" + "=" * 96)
-    print(" [docs/09 §3 사전등록 가설 채점표]")
-    print("-" * 96)
-    print(f" {'가설':<28} | {'사건 수':<6} | {'6봉 일치율':<8} | {'12봉 일치율':<8} | {'개미 대조군':<16} | {'판정':<10}")
-    print("-" * 96)
-    print(f" {'H1 ① 흡수':<26} | {h1_n:6d} | {h1_k6:7.0f}% | {h1_k12:7.0f}% | {f'{ant_k6:.0f}% (R>={ant_th:.4f})':<16} | {h1_eval:<10}")
-    print(f" {'H2 ① & 외국인 당일누적 반대':<20} | {h2_n:6d} | {h2_k6:7.0f}% | {h2_k12:7.0f}% | {'—':<16} | {h2_eval:<10}")
-    print(f" {'H3 ① & 기관 당일누적 같음':<22} | {h3_n:6d} | {h3_k6:7.0f}% | {h3_k12:7.0f}% | {'—':<16} | {h3_eval:<10}")
-    print(f" {'H4 ② 숨은 매집':<25} | {h4_n:6d} | {h4_k6:7.0f}% | {h4_k12:7.0f}% | {'—':<16} | {h4_eval:<10}")
-    print(f" {'H5 종목 이례도 |z|>=1.5 되돌림':<18} | {h5_n:6d} | {h5_k6:7.0f}% | {h5_k12:7.0f}% | {'—':<16} | {h5_eval:<10}")
-    print(f" {'H0 축 단독':<28} | {'—':<6} | {'—':<8} | {'—':<8} | {'—':<16} | {'기준선 안':<10}")
-    print("=" * 96)
+    def fmt_cell(h_dict, key):
+        c = h_dict["horizons"].get(key, {})
+        pct = c.get("pct", 0.0)
+        bp = c.get("mean_bp", 0.0)
+        return f"{pct:4.0f}% ({bp:+5.1f}bp)"
+
+    print("\n" + "=" * 128)
+    print(" [docs/09 §3 사전등록 가설 채점표 — 6·12봉 및 KRX/NXT 종가 종합]")
+    print("-" * 128)
+    print(f" {'가설':<28} | {'사건 수':<6} | {'6봉 일치율(bp)':<16} | {'12봉 일치율(bp)':<16} | {'KRX 종가(bp)':<16} | {'NXT 종가(bp)':<16} | {'개미 대조군(6봉/KRX)':<20} | {'판정':<8}")
+    print("-" * 128)
+    ant_summary = f"{ant['horizons'][6]['pct']:.0f}% / {ant['horizons']['krx']['pct']:.0f}% (R>={ant_th:.4f})"
+    print(f" {'H1 ① 흡수':<26} | {h1_n:6d} | {fmt_cell(h1, 6):<16} | {fmt_cell(h1, 12):<16} | {fmt_cell(h1, 'krx'):<16} | {fmt_cell(h1, 'nxt'):<16} | {ant_summary:<20} | {h1_eval:<8}")
+    print(f" {'H2 ① & 외국인 당일누적 반대':<20} | {h2_n:6d} | {fmt_cell(h2, 6):<16} | {fmt_cell(h2, 12):<16} | {fmt_cell(h2, 'krx'):<16} | {fmt_cell(h2, 'nxt'):<16} | {'—':<20} | {h2_eval:<8}")
+    print(f" {'H3 ① & 기관 당일누적 같음':<22} | {h3_n:6d} | {fmt_cell(h3, 6):<16} | {fmt_cell(h3, 12):<16} | {fmt_cell(h3, 'krx'):<16} | {fmt_cell(h3, 'nxt'):<16} | {'—':<20} | {h3_eval:<8}")
+    print(f" {'H4 ② 숨은 매집':<25} | {h4_n:6d} | {fmt_cell(h4, 6):<16} | {fmt_cell(h4, 12):<16} | {fmt_cell(h4, 'krx'):<16} | {fmt_cell(h4, 'nxt'):<16} | {'—':<20} | {h4_eval:<8}")
+    print(f" {'H5 종목 이례도 |z|>=1.5 되돌림':<18} | {h5_n:6d} | {fmt_cell(h5, 6):<16} | {fmt_cell(h5, 12):<16} | {fmt_cell(h5, 'krx'):<16} | {fmt_cell(h5, 'nxt'):<16} | {'—':<20} | {h5_eval:<8}")
+    print(f" {'H0 축 단독':<28} | {'—':<6} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<20} | {'기준선 안':<8}")
+    print("=" * 128)
+
+    # 시총 규모별 (대형주 vs 중형주/소형주) 층화 채점표
+    large_panel = [r for r in panel if r.get("size_tier") == "대형주"]
+    mid_panel = [r for r in panel if r.get("size_tier") in ("중형주", "소형주")]
+
+    if large_panel and mid_panel:
+        print("\n" + "=" * 116)
+        print(" [시가총액 규모별 층화 채점표 (대형주 vs 중형주/소형주)]")
+        print("-" * 116)
+        print(f" {'시총 구분':<10} | {'가설':<22} | {'사건 수':<6} | {'6봉 일치율(bp)':<16} | {'12봉 일치율(bp)':<16} | {'KRX 종가(bp)':<16} | {'NXT 종가(bp)':<16}")
+        print("-" * 116)
+        for tier_name, sub_p in [("대형주 (16종)", large_panel), ("중형주 (2종)", mid_panel)]:
+            sh1 = compute_stats(sub_p, s_absorb)
+            sh4 = compute_stats(sub_p, s_hidden)
+            sh5 = compute_stats(sub_p, s_z(1.5, True))
+            print(f" {tier_name:<9} | {'H1 ① 흡수':<20} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
+            print(f" {'〃':<12} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
+            print(f" {'〃':<12} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
+            if tier_name.startswith("대형주"):
+                print("-" * 116)
+        print("=" * 116)
 
 
 def main(argv=None) -> int:

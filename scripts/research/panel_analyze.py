@@ -61,7 +61,13 @@ def tier_group(t: dict) -> str:
 
 
 def build_panel(out_dir: str, date: str) -> list[dict]:
-    smap = json.load(open(os.path.join(os.path.dirname(out_dir.rstrip("/")), "sector_map_kospi16.json"), encoding="utf-8"))
+    rs_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+    meta_path = os.path.join(rs_root, "config", "stock_meta_18.json")
+    if not os.path.exists(meta_path):
+        meta_path = os.path.join(os.path.dirname(out_dir.rstrip("/")), "stock_meta_18.json")
+    if not os.path.exists(meta_path):
+        meta_path = os.path.join(os.path.dirname(out_dir.rstrip("/")), "sector_map_kospi16.json")
+    smap = json.load(open(meta_path, encoding="utf-8"))
     ddir = os.path.join(out_dir, "detail")
     snap = sorted(d for d in os.listdir(ddir) if d.isdigit())[-1]
     # KOSPI 슬롯
@@ -109,6 +115,11 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
                 last_f_time = a
                 last_f = f_val
             f_change_series.append((a, last_f_time))
+        candles_all = [c for c in (d.get("candles") or []) if c.get("ts_start", "")[:10] == date and not c.get("is_partial")]
+        c_krx = closes.get(f"{date}T15:30:00") or closes.get(f"{date}T15:20:00")
+        nxt_c = [c for c in candles_all if c.get("ts_start", "")[11:16] > "15:30"]
+        c_nxt = float(nxt_c[-1]["close"]) if nxt_c else c_krx
+        k_krx = (kospi.get(f"{date}T15:20:00") or kospi.get(f"{date}T15:30:00") or (sorted(kospi.values(), key=lambda x: x.get("close", 0))[-1] if kospi else {})).get("close")
         tb = {t["ts_start"]: t for t in d.get("trade_buckets") or [] if not t["is_partial"] and t["ts_start"][:10] == date}
         kclose = {t: v["close"] for t, v in kospi.items()}
         ts_list = sorted(t for t in tb if REG_START <= t[11:16] <= REG_END)
@@ -123,7 +134,9 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
             total = sum(v["buy"] + v["sell"] for v in g.values())
             net = {k: g[k]["buy"] - g[k]["sell"] for k in ("whale", "mid", "ant")}
             cum_net += net["whale"]; cum_tot += total
-            row = {"sym": sym, "ts": ts, "sector": meta["up_name"], "whale_net": net["whale"], "mid_net": net["mid"], "ant_net": net["ant"], "bar_amt": total,
+            row = {"sym": sym, "ts": ts, "name": meta.get("name", sym), "sector": meta.get("up_name", "기타"),
+                   "size_tier": meta.get("size_tier", "대형주"), "market_cap_eok": meta.get("market_cap_eok"),
+                   "whale_net": net["whale"], "mid_net": net["mid"], "ant_net": net["ant"], "bar_amt": total,
                    "whale_ratio": net["whale"] / total if total else 0.0, "mid_ratio": net["mid"] / total if total else 0.0,
                    "ant_ratio": net["ant"] / total if total else 0.0,
                    "whale_cum_ratio": cum_net / cum_tot if cum_tot else None}
@@ -150,6 +163,12 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
                 ck, ik = closes.get(next_ts(ts, k)), kclose.get(next_ts(ts, k))
                 row[f"fwd{k}"] = (ck / cur - 1) * 1e4 if cur and ck else None
                 row[f"fwdex{k}"] = (row[f"fwd{k}"] - (ik / i1 - 1) * 1e4) if (row[f"fwd{k}"] is not None and i1 and ik) else None
+            # KRX 정규장 종가 및 NXT 야간 종가 초과수익률
+            row["fwd_krx"] = (c_krx / cur - 1) * 1e4 if cur and c_krx else None
+            row["fwdex_krx"] = (row["fwd_krx"] - (k_krx / i1 - 1) * 1e4) if (row["fwd_krx"] is not None and i1 and k_krx) else None
+            row["fwd_nxt"] = (c_nxt / cur - 1) * 1e4 if cur and c_nxt else None
+            row["fwdex_nxt"] = (row["fwd_nxt"] - (k_krx / i1 - 1) * 1e4) if (row["fwd_nxt"] is not None and i1 and k_krx) else None
+            row["nxt_drift_bp"] = (c_nxt / c_krx - 1) * 1e4 if (c_krx and c_nxt) else None
             # 종목 투자자(as-of 봉 종료, 5분 증분)
             end = bar_end(ts)
             cur_inv, prev_inv = asof(inv_series, end), asof(inv_series, ts)
@@ -213,12 +232,27 @@ def report(title: str, panel: list[dict], sel, excess: bool = True) -> dict:
     stats = {"title": title, "events": len(eps), "symbols": len(Counter(e["sym"] for e in eps)), "horizons": {}}
     for k in HORIZONS:
         key = f"fwdex{k}" if excess else f"fwd{k}"
-        xs = [e[key] * e["_dir"] for e in eps if e[key] is not None]
+        xs = [e[key] * e["_dir"] for e in eps if e.get(key) is not None]
         same = sum(1 for x in xs if x > 0); tot = sum(1 for x in xs if x != 0)
         pct = 100 * same / tot if tot else 0.0
         mean_bp = statistics.mean(xs) if xs else 0.0
         cells.append(f"k={k}: {mean_bp:+6.1f}bp {same}/{tot}={pct:3.0f}%")
         stats["horizons"][k] = {"mean_bp": mean_bp, "same": same, "tot": tot, "pct": pct}
+    k_key = "fwdex_krx" if excess else "fwd_krx"
+    xs_k = [e[k_key] * e["_dir"] for e in eps if e.get(k_key) is not None]
+    same_k = sum(1 for x in xs_k if x > 0); tot_k = sum(1 for x in xs_k if x != 0)
+    pct_k = 100 * same_k / tot_k if tot_k else 0.0
+    mean_k = statistics.mean(xs_k) if xs_k else 0.0
+    cells.append(f"KRX: {mean_k:+6.1f}bp {same_k}/{tot_k}={pct_k:3.0f}%")
+    stats["horizons"]["krx"] = {"mean_bp": mean_k, "same": same_k, "tot": tot_k, "pct": pct_k}
+
+    n_key = "fwdex_nxt" if excess else "fwd_nxt"
+    xs_n = [e[n_key] * e["_dir"] for e in eps if e.get(n_key) is not None]
+    same_n = sum(1 for x in xs_n if x > 0); tot_n = sum(1 for x in xs_n if x != 0)
+    pct_n = 100 * same_n / tot_n if tot_n else 0.0
+    mean_n = statistics.mean(xs_n) if xs_n else 0.0
+    cells.append(f"NXT: {mean_n:+6.1f}bp {same_n}/{tot_n}={pct_n:3.0f}%")
+    stats["horizons"]["nxt"] = {"mean_bp": mean_n, "same": same_n, "tot": tot_n, "pct": pct_n}
     syms = Counter(e["sym"] for e in eps)
     print(f"  {title:<40} 사건 {len(eps):3d} (종목 {len(syms)}, 최다 {syms.most_common(1)[0][1] if syms else 0}) | " + " | ".join(cells))
     return stats

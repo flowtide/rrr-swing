@@ -1,0 +1,110 @@
+{
+  "000150": {
+    "name": "두산",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 224608.0
+  },
+  "000660": {
+    "name": "SK하이닉스",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 12849361.0
+  },
+  "005380": {
+    "name": "현대차",
+    "up_name": "운송장비/부품",
+    "size_tier": "대형주",
+    "market_cap_eok": 741223.0
+  },
+  "005930": {
+    "name": "삼성전자",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 14820316.0
+  },
+  "006400": {
+    "name": "삼성SDI",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 438385.0
+  },
+  "006800": {
+    "name": "미래에셋증권",
+    "up_name": "증권",
+    "size_tier": "대형주",
+    "market_cap_eok": 172409.0
+  },
+  "009150": {
+    "name": "삼성전기",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 1031520.0
+  },
+  "010120": {
+    "name": "LS ELECTRIC",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 299100.0
+  },
+  "012450": {
+    "name": "한화에어로스페이스",
+    "up_name": "운송장비/부품",
+    "size_tier": "대형주",
+    "market_cap_eok": 543994.0
+  },
+  "034020": {
+    "name": "두산에너빌리티",
+    "up_name": "기계/장비",
+    "size_tier": "대형주",
+    "market_cap_eok": 536790.0
+  },
+  "035420": {
+    "name": "NAVER",
+    "up_name": "IT 서비스",
+    "size_tier": "대형주",
+    "market_cap_eok": 306470.0
+  },
+  "042700": {
+    "name": "한미반도체",
+    "up_name": "기계/장비",
+    "size_tier": "대형주",
+    "market_cap_eok": 215406.0
+  },
+  "066570": {
+    "name": "LG전자",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 325769.0
+  },
+  "108490": {
+    "name": "로보티즈",
+    "up_name": "KOSDAQ/로봇",
+    "size_tier": "중형주",
+    "market_cap_eok": 45321.0
+  },
+  "196170": {
+    "name": "알테오젠",
+    "up_name": "KOSDAQ/바이오",
+    "size_tier": "대형주",
+    "market_cap_eok": 177969.0
+  },
+  "277810": {
+    "name": "레인보우로보틱스",
+    "up_name": "KOSDAQ/로봇",
+    "size_tier": "대형주",
+    "market_cap_eok": 82158.0
+  },
+  "336260": {
+    "name": "두산퓨얼셀",
+    "up_name": "전기/전자",
+    "size_tier": "중형주",
+    "market_cap_eok": 33598.0
+  },
+  "373220": {
+    "name": "LG에너지솔루션",
+    "up_name": "전기/전자",
+    "size_tier": "대형주",
+    "market_cap_eok": 858780.0
+  }
+}
