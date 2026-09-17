@@ -23,7 +23,7 @@ Scope: rrr-web 체결금액대 패널의 **큰손(체결 1건 1억 초과) 순�
 
 | 축 | 필드 | 원천 | 갱신 | 봉에 맞추는 규칙 | 주의 |
 |---|---|---|---|---|---|
-| 종목 메타 | name, size_tier(대형주/중형주/소형주), market_cap_eok(억원) | `stock_meta.json` (시총 5조 이상 대형주, 1조 이상 중형주) | 고정 | 종목코드 일치 | 대형주 16종, 중형주 2종(두산퓨얼셀·로보티즈) |
+| 종목 메타 | name, session(pre/reg/post), size_tier(대형주/중형주/소형주), market_cap_eok(억원) | `stock_meta.json` (시총 5조 이상 대형주, 1조 이상 중형주) | 고정/시각 | 종목코드 일치 | 세션 구분(pre 08:00~08:50, reg 09:00~15:20, post 15:40~20:00) |
 | 가격 | close, same_bp | rrr `/detail` candles | 봉 | ts_start 일치 | |
 | 큰손·중간·개미 | whale/mid/ant_net(원), whale/mid/ant_ratio(=순매수/봉 거래대금), whale_cum_ratio(당일 누적), whale_z(종목별 롤링 24봉·최소 12 z-score) | rrr `/detail` trade_buckets — 구간 `5억이하`·`5억초과` = 큰손, `1천이하` 까지 = 개미 | 봉 | ts_start 일치 | 체결 1건 = 주문 1건이 아니다 |
 | 종목 투자자 | frgn_cum, orgn_cum(억원, 당일 누적), *_d5(5분 증분), frgn_change_asof·frgn_change_stale_min(수치가 마지막으로 바뀐 시각과 그로부터 봉 종료까지의 분) | rrr `/detail` investor_flow(ka10059) | 90초 | as_of ≤ 봉 종료(ts+5분)인 마지막 샘플 | 거래소 잠정치·계단형. `as_of` 는 rrr 폴링 시각이지 거래소 갱신 시각이 아니다 — 신선도는 `*_change_*` 로 판단. 증분은 0 이 많다. 개인 필드 없음 |
