@@ -21,6 +21,8 @@ from panel_analyze import (
     report,
     s_absorb,
     s_hidden,
+    s_intensity_absorb,
+    s_smart_money,
     s_z,
     sgn,
     with_axis,
@@ -36,6 +38,12 @@ H4_MIN_ACC = 60.0
 
 H5_MIN_EVENTS = 30
 H5_MIN_ACC = 60.0
+
+H6_MIN_EVENTS = 30
+H6_MIN_ACC = 60.0
+
+H7_MIN_EVENTS = 20
+H7_MIN_ACC = 60.0
 
 
 def resolve_dates(dates_arg: str | None, from_arg: str | None, to_arg: str | None) -> list[str]:
@@ -120,6 +128,10 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     h4 = compute_stats(panel, s_hidden)
     # H5
     h5 = compute_stats(panel, s_z(1.5, True))
+    # H6
+    h6 = compute_stats(panel, s_intensity_absorb)
+    # H7
+    h7 = compute_stats(panel, s_smart_money)
 
     # 채점 판정
     h1_n = h1["events"]
@@ -180,6 +192,26 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     else:
         h5_eval = "미달"
 
+    # H6: 사건 >= 30, 6봉 일치 >= 60%
+    h6_n = h6["events"]
+    h6_k6 = h6["horizons"][6]["pct"]
+    if h6_n >= H6_MIN_EVENTS and h6_k6 >= H6_MIN_ACC:
+        h6_eval = "통과"
+    elif h6_n < H6_MIN_EVENTS:
+        h6_eval = "보류"
+    else:
+        h6_eval = "미달"
+
+    # H7: 사건 >= 20, KRX 종가 일치 >= 60%
+    h7_n = h7["events"]
+    h7_krx = h7["horizons"]["krx"]["pct"]
+    if h7_n >= H7_MIN_EVENTS and h7_krx >= H7_MIN_ACC:
+        h7_eval = "통과"
+    elif h7_n < H7_MIN_EVENTS:
+        h7_eval = "보류"
+    else:
+        h7_eval = "미달"
+
     def fmt_cell(h_dict, key):
         c = h_dict["horizons"].get(key, {})
         pct = c.get("pct", 0.0)
@@ -197,6 +229,8 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
     print(f" {'H3 큰손 흡수 & 기관 동행':<22} | {h3_n:6d} | {fmt_cell(h3, 6):<16} | {fmt_cell(h3, 12):<16} | {fmt_cell(h3, 'krx'):<16} | {fmt_cell(h3, 'nxt'):<16} | {'—':<20} | {h3_eval:<8}")
     print(f" {'H4 ② 숨은 매집':<25} | {h4_n:6d} | {fmt_cell(h4, 6):<16} | {fmt_cell(h4, 12):<16} | {fmt_cell(h4, 'krx'):<16} | {fmt_cell(h4, 'nxt'):<16} | {'—':<20} | {h4_eval:<8}")
     print(f" {'H5 종목 이례도 |z|>=1.5 되돌림':<18} | {h5_n:6d} | {fmt_cell(h5, 6):<16} | {fmt_cell(h5, 12):<16} | {fmt_cell(h5, 'krx'):<16} | {fmt_cell(h5, 'nxt'):<16} | {'—':<20} | {h5_eval:<8}")
+    print(f" {'H6 체결강도 흡수 다이버전스':<20} | {h6_n:6d} | {fmt_cell(h6, 6):<16} | {fmt_cell(h6, 12):<16} | {fmt_cell(h6, 'krx'):<16} | {fmt_cell(h6, 'nxt'):<16} | {'—':<20} | {h6_eval:<8}")
+    print(f" {'H7 스마트머니 체결 괴리':<22} | {h7_n:6d} | {fmt_cell(h7, 6):<16} | {fmt_cell(h7, 12):<16} | {fmt_cell(h7, 'krx'):<16} | {fmt_cell(h7, 'nxt'):<16} | {'—':<20} | {h7_eval:<8}")
     print(f" {'H0 축 단독':<28} | {'—':<6} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<16} | {'—':<20} | {'기준선 안':<8}")
     print("=" * 128)
 
@@ -214,9 +248,13 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
             sh1 = compute_stats(sub_p, s_absorb)
             sh4 = compute_stats(sub_p, s_hidden)
             sh5 = compute_stats(sub_p, s_z(1.5, True))
+            sh6 = compute_stats(sub_p, s_intensity_absorb)
+            sh7 = compute_stats(sub_p, s_smart_money)
             print(f" {tier_name:<9} | {'H1 ① 큰손 흡수':<18} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
             print(f" {'〃':<12} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
             print(f" {'〃':<12} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
+            print(f" {'〃':<12} | {'H6 체결강도 다이버전스':<17} | {sh6['events']:6d} | {fmt_cell(sh6, 6):<16} | {fmt_cell(sh6, 12):<16} | {fmt_cell(sh6, 'krx'):<16} | {fmt_cell(sh6, 'nxt'):<16}")
+            print(f" {'〃':<12} | {'H7 스마트머니 괴리':<19} | {sh7['events']:6d} | {fmt_cell(sh7, 6):<16} | {fmt_cell(sh7, 12):<16} | {fmt_cell(sh7, 'krx'):<16} | {fmt_cell(sh7, 'nxt'):<16}")
             if tier_name.startswith("대형주"):
                 print("-" * 116)
         print("=" * 116)
@@ -242,9 +280,13 @@ def print_scorecard(panel: list[dict], ant_th: float, q: float) -> None:
             sh1 = compute_stats(sub_p, s_absorb)
             sh4 = compute_stats(sub_p, s_hidden)
             sh5 = compute_stats(sub_p, s_z(1.5, True))
+            sh6 = compute_stats(sub_p, s_intensity_absorb)
+            sh7 = compute_stats(sub_p, s_smart_money)
             print(f" {s_label:<13} | {'H1 ① 큰손 흡수':<18} | {sh1['events']:6d} | {fmt_cell(sh1, 6):<16} | {fmt_cell(sh1, 12):<16} | {fmt_cell(sh1, 'krx'):<16} | {fmt_cell(sh1, 'nxt'):<16}")
             print(f" {'〃':<20} | {'H4 ② 숨은 매집':<20} | {sh4['events']:6d} | {fmt_cell(sh4, 6):<16} | {fmt_cell(sh4, 12):<16} | {fmt_cell(sh4, 'krx'):<16} | {fmt_cell(sh4, 'nxt'):<16}")
             print(f" {'〃':<20} | {'H5 이례도 되돌림':<20} | {sh5['events']:6d} | {fmt_cell(sh5, 6):<16} | {fmt_cell(sh5, 12):<16} | {fmt_cell(sh5, 'krx'):<16} | {fmt_cell(sh5, 'nxt'):<16}")
+            print(f" {'〃':<20} | {'H6 체결강도 다이버전스':<17} | {sh6['events']:6d} | {fmt_cell(sh6, 6):<16} | {fmt_cell(sh6, 12):<16} | {fmt_cell(sh6, 'krx'):<16} | {fmt_cell(sh6, 'nxt'):<16}")
+            print(f" {'〃':<20} | {'H7 스마트머니 괴리':<19} | {sh7['events']:6d} | {fmt_cell(sh7, 6):<16} | {fmt_cell(sh7, 12):<16} | {fmt_cell(sh7, 'krx'):<16} | {fmt_cell(sh7, 'nxt'):<16}")
             print("-" * 116)
         print("=" * 116)
 

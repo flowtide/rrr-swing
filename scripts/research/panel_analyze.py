@@ -132,6 +132,7 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
         kclose = {t: v["close"] for t, v in kospi.items()}
         ts_list = sorted(t for t in tb if ("08:00" <= t[11:16] <= "15:20" or "15:40" <= t[11:16] <= "19:55"))
         cum_net = cum_tot = 0.0
+        cum_bq = cum_sq = 0
         first = ts_list[0] if ts_list else None
         w_hist = []
         for ts in ts_list:
@@ -142,19 +143,38 @@ def build_panel(out_dir: str, date: str) -> list[dict]:
                 sess = "reg"
             else:
                 sess = "post"
-            g = defaultdict(lambda: {"buy": 0.0, "sell": 0.0})
+            g = defaultdict(lambda: {"buy": 0.0, "sell": 0.0, "buy_qty": 0, "sell_qty": 0})
             for t in tb[ts]["tiers"]:
                 k = tier_group(t)
                 g[k]["buy"] += num(t["buy_amount"]); g[k]["sell"] += num(t["sell_amount"])
+                g[k]["buy_qty"] += t.get("buy_quantity", 0); g[k]["sell_qty"] += t.get("sell_quantity", 0)
             total = sum(v["buy"] + v["sell"] for v in g.values())
             net = {k: g[k]["buy"] - g[k]["sell"] for k in ("whale", "mid", "ant")}
             cum_net += net["whale"]; cum_tot += total
+
+            # 전체 및 계층별 체결강도 / 매수비중 계산
+            tot_bq = tb[ts].get("total_buy_quantity", sum(v["buy_qty"] for v in g.values()))
+            tot_sq = tb[ts].get("total_sell_quantity", sum(v["sell_qty"] for v in g.values()))
+            tot_q = tb[ts].get("total_quantity", tot_bq + tot_sq)
+            cum_bq += tot_bq; cum_sq += tot_sq
+
+            buy_share = round(tot_bq / tot_q * 100, 2) if tot_q else 50.0
+            hts_intensity = round(tot_bq / tot_sq * 100, 2) if tot_sq else None
+            cum_buy_share = round(cum_bq / (cum_bq + cum_sq) * 100, 2) if (cum_bq + cum_sq) else 50.0
+
+            w_tot_q = g["whale"]["buy_qty"] + g["whale"]["sell_qty"]
+            a_tot_q = g["ant"]["buy_qty"] + g["ant"]["sell_qty"]
+            whale_buy_share = round(g["whale"]["buy_qty"] / w_tot_q * 100, 2) if w_tot_q else None
+            ant_buy_share = round(g["ant"]["buy_qty"] / a_tot_q * 100, 2) if a_tot_q else None
+
             row = {"sym": sym, "ts": ts, "session": sess, "name": meta.get("name", sym), "sector": meta.get("up_name", "기타"),
                    "size_tier": meta.get("size_tier", "대형주"), "market_cap_eok": meta.get("market_cap_eok"),
                    "whale_net": net["whale"], "mid_net": net["mid"], "ant_net": net["ant"], "bar_amt": total,
                    "whale_ratio": net["whale"] / total if total else 0.0, "mid_ratio": net["mid"] / total if total else 0.0,
                    "ant_ratio": net["ant"] / total if total else 0.0,
-                   "whale_cum_ratio": cum_net / cum_tot if cum_tot else None}
+                   "whale_cum_ratio": cum_net / cum_tot if cum_tot else None,
+                   "buy_share": buy_share, "hts_intensity": hts_intensity, "cum_buy_share": cum_buy_share,
+                   "whale_buy_share": whale_buy_share, "ant_buy_share": ant_buy_share}
             # T2: 종목별 롤링 24봉(최소 12) 큰손 순매수 z-score
             if len(w_hist) >= 12:
                 mu, sd = statistics.mean(w_hist), statistics.pstdev(w_hist)
@@ -338,6 +358,25 @@ def s_z(th: float = 1.5, reverse: bool = False):
     return sel
 
 
+def s_intensity_absorb(r: dict) -> int:
+    """H6 체결강도 흡수 다이버전스: 매수체결비중 >= 55% 인데 가격은 지수 대비 미상승(same_ex <= 0)"""
+    bs = r.get("buy_share")
+    s = 1 if (bs is not None and bs >= 55.0) else -1 if (bs is not None and bs <= 45.0) else 0
+    p_ret = r.get("same_ex") if r.get("same_ex") is not None else r.get("same_bp")
+    return s if s and p_ret is not None and p_ret * s <= 0 else 0
+
+
+def s_smart_money(r: dict) -> int:
+    """H7 스마트머니 체결 괴리: 큰손 매수비중 >= 60% & 개미 매수비중 <= 40%"""
+    wb, ab = r.get("whale_buy_share"), r.get("ant_buy_share")
+    if wb is not None and ab is not None:
+        if wb >= 60.0 and ab <= 40.0:
+            return 1
+        elif wb <= 40.0 and ab >= 60.0:
+            return -1
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
@@ -348,7 +387,7 @@ def main(argv=None) -> int:
         for r in panel:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     syms = sorted({r["sym"] for r in panel})
-    cov = {k: sum(1 for r in panel if r.get(k) is not None) for k in ("same_ex", "frgn_cum", "frgn_d5", "mprog_cum", "mprog_d5", "sect_frgn_cum", "sect_frgn_d5")}
+    cov = {k: sum(1 for r in panel if r.get(k) is not None) for k in ("same_ex", "frgn_cum", "frgn_d5", "mprog_cum", "mprog_d5", "sect_frgn_cum", "sect_frgn_d5", "buy_share", "hts_intensity")}
     print(f"panel rows={len(panel)} symbols={len(syms)} {syms}\n축 커버리지(값 있는 봉 수): {cov}")
 
     print("\n[기준선] 초과수익률(EX) — 0·50% 근처여야 한다")
@@ -443,6 +482,11 @@ def main(argv=None) -> int:
     report("① frgn_stale_min > 30 (샘플 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_stale_min") is not None and r["frgn_stale_min"] > 30 else 0)
     report("① frgn_change_stale <= 30 (수치변동 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_change_stale_min") is not None and r["frgn_change_stale_min"] <= 30 else 0)
     report("① frgn_change_stale > 30 (수치변동 as_of)", panel, lambda r: s_absorb(r) if r.get("frgn_change_stale_min") is not None and r["frgn_change_stale_min"] > 30 else 0)
+
+    # H6/H7: 체결강도 및 스마트머니 신호
+    print("\n[⑧ 체결강도 & 스마트머니 신호 (H6/H7)]")
+    report("H6 체결강도 흡수 다이버전스 (buy_share>=55% & same_ex<=0)", panel, s_intensity_absorb)
+    report("H7 스마트머니 체결 괴리 (whale>=60% & ant<=40%)", panel, s_smart_money)
     return 0
 
 
